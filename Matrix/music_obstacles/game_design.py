@@ -3,7 +3,7 @@ import time
 import random
 from song_search_engine import searchOnlineFiles, play_song
 import state
-from obstacole_structures import line, column, shuriken, arrow, bubble, diag1, diag2, diamond, chess
+from obstacole_structures import line, column, shuriken, arrow, bubble, diag1, diag2, diamond, chess, island
 
 # constants
 BOARD_WIDTH = 16
@@ -52,35 +52,70 @@ class GameDesignMixin:
     # ===================== obstacle methods ============================
     def update_and_draw_obstacles(self, frame_grid):
         for obs in self.active_obstacles:
-            # move logic
             if isinstance(obs, column):
-                obs.x += obs.speed 
-            else:
-                obs.y += obs.speed 
+                obs.x += obs.speed  
             
-            # draw stuff
+            elif isinstance(obs, (bubble, diag1, diag2)):
+
+                obs.x += obs.speed  
+                obs.y += obs.speed 
+                
+            else:
+                obs.y += obs.speed  
+            
             for dx, dy in obs.shape:
                 px, py = int(obs.x + dx), int(obs.y + dy)
                 if 0 <= px < BOARD_WIDTH and 0 <= py < BOARD_HEIGHT:
                     frame_grid[(px, py)] = obs.color
         
-        # clean stuff
+        # Curățăm obiectele care au ieșit din matrice (indiferent de axă)
         self.active_obstacles = [o for o in self.active_obstacles if o.y < BOARD_HEIGHT and o.x < BOARD_WIDTH]
     
     def spawn_random_obstacle(self):
         obs_types = [line, shuriken, arrow, bubble, column, diag1, diag2, diamond, chess]
         chosen_type = random.choice(obs_types)
-        new_id = int(time.time())
+        id_unic = int(time.time() * 250) 
         
         if chosen_type == line:
-            new_obs = chosen_type(id=new_id, x=0, y=-1, speed=1.0, color=RED)
+            new_obs = chosen_type(id=id_unic, x=0, y=-1, speed=0.5, color=RED)
+            
         elif chosen_type == column:
-            new_obs = chosen_type(id=new_id, x=-1, y=0, speed=1.0, color=RED)
+            new_obs = chosen_type(id=id_unic, x=-1, y=0, speed=0.5, color=RED)
+            
+        elif chosen_type in [bubble, diag1]:
+            random_row = random.randint(0, BOARD_HEIGHT - 1)
+            new_obs = chosen_type(id=id_unic, x=1, y=random_row, speed=0.5, color=RED)
+            
         else:
-            random_x = random.randint(1, 13)
-            new_obs = chosen_type(id=new_id, x=random_x, y=-5, speed=0.7, color=RED)
+            random_col = random.randint(1, 10)
+            new_obs = chosen_type(id=id_unic, x=random_col, y=-5, speed=0.5, color=RED)
             
         self.active_obstacles.append(new_obs)
+
+    # # ===================== obstacle methods ============================
+    # def update_and_draw_obstacles(self, frame_grid):
+    #     for obs in self.active_obstacles:
+    #         if isinstance(obs, column):
+    #             obs.x += obs.speed  
+            
+    #         elif isinstance(obs, (bubble, diag2)):
+    #             obs.y += obs.speed 
+    #             obs.x += obs.speed  
+    #         else:
+    #             obs.y += obs.speed
+            
+    #         for dx, dy in obs.shape:
+    #             px, py = int(obs.x + dx), int(obs.y + dy)
+    #             if 0 <= px < BOARD_WIDTH and 0 <= py < BOARD_HEIGHT:
+    #                 frame_grid[(px, py)] = obs.color
+        
+    #     self.active_obstacles = [o for o in self.active_obstacles if o.y < BOARD_HEIGHT and o.x < BOARD_WIDTH]
+    
+    # def spawn_random_islands(self):
+    #     id_unic = int(time.time() * 250) 
+        
+    #     new_island = island(id_unic, )
+
 
     # ===================== game methods ============================
     def start_game_countdown(self, url, title, count):
@@ -97,5 +132,6 @@ class GameDesignMixin:
         else:
             self.is_counting_down = False
             self.active_obstacles = []
+            self.next_spawn_in = random.randint(20, 40)
             self.lbl_music_status.config(text=f"🎵 Now playing: {title[:20]}", fg="#00ff00")
             play_song(url)

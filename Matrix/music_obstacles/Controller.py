@@ -651,12 +651,21 @@ class MatrixGUI(GameDesignMixin):
         return frame_grid
 
     def sending_loop(self):
+        if not hasattr(self, 'next_spawn_in'):
+            self.next_spawn_in = 50
+
         while self.is_sending:
             music_active = state.current_player is not None and state.current_player.poll() is None
             
-            if music_active:
-                if self.time_counter % 70 == 0:
+            if music_active and not self.is_counting_down:
+                # spawn each 0.5
+                self.next_spawn_in -= 1
+                
+                # timer done
+                if self.next_spawn_in <= 0:
                     self.spawn_random_obstacle()
+                    # reset interval
+                    self.next_spawn_in = random.randint(15, 60)
 
             frame = self.render_frame()
             self.network.send_packet(frame)
