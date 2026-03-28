@@ -1,6 +1,7 @@
 import sys 
 from dataclasses import dataclass, field
 from typing import List, Tuple
+BABY_BLUE = (137, 207, 240)
 
 @dataclass
 class obstacle:
@@ -82,10 +83,20 @@ class diamond(obstacle):
             (2, 4)
         ]
 
-class island(obstacle):
-    def  __post_init__(self):
-        self.shape = [
-            (0, 0), (1, 0), (2, 0),
-            (1, 0) , (1, 1), (1, 2),
-            (0, 2), (1, 2), (2, 2)
-        ]
+@dataclass
+class island:
+    id: int
+    x: int
+    y: int
+    color: Tuple[int, int, int] = BABY_BLUE
+    shape: List[Tuple[int, int]] = field(default_factory=lambda: [
+        (dx, dy) for dy in range(3) for dx in range(3)
+    ])
+
+@dataclass 
+class points:
+    id: int
+    x: int
+    y: int
+    color: Tuple[int, int, int]
+    shape: List[Tuple[int, int]] = field(default_factory=lambda: [(0, 0)])

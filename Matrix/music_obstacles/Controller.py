@@ -20,11 +20,15 @@ import state
 from obstacole_structures import line, column, shuriken, arrow, bubble
 # code modularization -> game_design
 from game_design import GameDesignMixin
+from obstacole_structures import (
+    line, column, shuriken, arrow, bubble, 
+    diag1, diag2, diamond, chess, island, points
+)
+# dashboard
+from ui import DashboardUI
 
 # --- Constants ---
 UDP_SEND_IP = "255.255.255.255"
-# SEND_PORT is now dynamic from CONFIG
-# RECV_PORT is now dynamic from CONFIG
 NUM_CHANNELS = 8
 LEDS_PER_CHANNEL = 64
 FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3
@@ -81,10 +85,7 @@ class NetworkManager:
         self.target_ip = CONFIG.get("device_ip", "255.255.255.255")
         self.send_port = CONFIG.get("send_port", 4626)
         
-        # Priority: Auto-detecting 169.254 (for hardware)
-
     def _auto_bind(self):
-        # Auto-Bind Logic
         try:
             for iface, addrs in psutil.net_if_addrs().items():
                 for addr in addrs:
@@ -138,7 +139,6 @@ class NetworkManager:
         threading.Thread(target=_thread, daemon=True).start()
 
     def send_packet(self, frame_data):
-        # Protocol v11 Implementation
         self.sequence_number = (self.sequence_number + 1) & 0xFFFF
         if self.sequence_number == 0: self.sequence_number = 1
         
@@ -155,7 +155,7 @@ class NetworkManager:
             self.sequence_number & 0xFF,
             0x00, 0x00, 0x00 
         ])
-        start_packet.append(0x0E) # Force Checksum
+        start_packet.append(0x0E)
         start_packet.append(0x00) 
         try: 
             self.sock_send.sendto(start_packet, (target_ip, port))
@@ -183,7 +183,7 @@ class NetworkManager:
             0x75, rand1, rand2, 
             (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)
         ]) + fff0_internal
-        fff0_packet.append(0x1E) # Force Checksum
+        fff0_packet.append(0x1E) 
         fff0_packet.append(0x00) 
         
         try: 
@@ -229,7 +229,7 @@ class NetworkManager:
             except: pass
             
             data_packet_index += 1
-            time.sleep(0.002) # Faster for GUI
+            time.sleep(0.002)
 
         # --- 4. End Packet ---
         rand1 = random.randint(0, 127)
@@ -259,33 +259,33 @@ class MatrixGUI(GameDesignMixin):
         
         self.current_color = RED
         self.is_sending = False
-        self.cell_size = 20 # Initial user default
+        self.cell_size = 20 
         self.animation_mode = "Manual"
         self.time_counter = 0
 
-        # obstacles vector
         self.active_obstacles = []
-        # for countdown 
         self.is_counting_down = False
+        self.active_islands = []
+        self.manage_islands()
+        
+        self.active_points = []
+        self.max_points = 5
+        self._point_loop()
+        
+        self.lives = 5
+        self.score = 0 
+        self.last_hit_time = 0
 
-        self.active_obstacles.append(shuriken(id=1, x=5, y=5, speed=1.0))
-        self.active_obstacles.append(bubble(id=2, x=10, y=20, speed=0.5, color=CYAN))
-
-
-        # Grid State: (x, y) -> Color
+        # Grid State
         self.grid_data = {} 
         for y in range(self.grid_height):
             for x in range(self.grid_width):
                 self.grid_data[(x, y)] = BLACK
 
-        # Setup Network
         self.network = NetworkManager()
         self.send_lock = threading.Lock()
-        
-        # Trigger States: dict mapping (ch, led) to bool
         self.trigger_states = {}
         
-        # Initialize port variables BEFORE binding
         self.port_out_var = tk.StringVar(value=str(CONFIG.get("send_port", 4626)))
         self.port_in_var = tk.StringVar(value=str(CONFIG.get("recv_port", 7800)))
 
@@ -301,113 +301,162 @@ class MatrixGUI(GameDesignMixin):
         if CONFIG.get("auto_start_streaming", False):
             self.root.after(1000, self.toggle_sending)
         
-        # Canvas
         self.canvas = tk.Canvas(main_frame, bg="black", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<B1-Motion>", self.paint)
         self.canvas.bind("<Button-1>", self.paint)
         self.canvas.bind("<Configure>", self.on_resize)
         
-        # Controls
-        control_frame = tk.Frame(root, width=200, bg="#222")
+        # --- CONTROL PANEL REORGANIZATION ---
+        control_frame = tk.Frame(root, width=240, bg="#222")
         control_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
         
-        tk.Label(control_frame, text="TOOLS", bg="#222", fg="#888", font=("Consolas", 10, "bold")).pack(pady=5)
-        
-        # Config Button at top
-        tk.Button(control_frame, text="⚙ Config", command=self._open_config, bg="#444", fg="white", font=("Consolas", 9, "bold"), relief="flat").pack(fill=tk.X, pady=5, padx=5)
-
+        tk.Label(control_frame, text="MATRIX CONTROL", bg="#222", fg="#888", font=("Consolas", 12, "bold")).pack(pady=5)
         self.btn_send = tk.Button(control_frame, text="START STREAM", command=self.toggle_sending, bg="green", fg="white", font=("Consolas", 10, "bold"), relief="flat")
         self.btn_send.pack(fill=tk.X, pady=5, padx=5)
-        
-        tk.Button(control_frame, text="Clear Board", command=self.clear_board, bg="#444", fg="white", font=("Consolas", 9), relief="flat").pack(fill=tk.X, pady=5, padx=5)
-        
-        # Animation Controls
-        tk.Label(control_frame, text="ANIMATION MODE", bg="#222", fg="#888", font=("Consolas", 10, "bold")).pack(pady=5)
+
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure('TNotebook', background='#222', borderwidth=0)
+        style.configure('TNotebook.Tab', background='#444', foreground='white', padding=[10, 5], font=("Consolas", 9, "bold"))
+        style.map('TNotebook.Tab', background=[('selected', '#1a1a1a')], foreground=[('selected', '#00d4ff')])
+
+        notebook = ttk.Notebook(control_frame)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # 1. TAB CONFIG
+        tab_config = tk.Frame(notebook, bg="#1a1a1a")
+        notebook.add(tab_config, text="Config")
+        tk.Button(tab_config, text="⚙ Network Settings", command=self._open_config, bg="#444", fg="white", font=("Consolas", 9, "bold"), relief="flat").pack(fill=tk.X, pady=10, padx=10)
+        tk.Button(tab_config, text="Clear Matrix Board", command=self.clear_board, bg="#442222", fg="white", font=("Consolas", 9, "bold"), relief="flat").pack(fill=tk.X, pady=5, padx=10)
+        self.lbl_net_status = tk.Label(tab_config, text=f"Target: {self.network.target_ip}\nPort OUT:{self.network.send_port} | IN:{CONFIG.get('recv_port')}", bg="#1a1a1a", fg="#66aa66", font=("Consolas", 8), justify=tk.LEFT)
+        self.lbl_net_status.pack(pady=10)
+
+        # 2. TAB ANIM
+        tab_anim = tk.Frame(notebook, bg="#1a1a1a")
+        notebook.add(tab_anim, text="Anim")
+        tk.Label(tab_anim, text="Animation Mode", bg="#1a1a1a", fg="#888", font=("Consolas", 9)).pack(pady=(10, 2))
         self.anim_var = tk.StringVar(value="Manual")
-        self.anim_combo = ttk.Combobox(control_frame, textvariable=self.anim_var)
+        self.anim_combo = ttk.Combobox(tab_anim, textvariable=self.anim_var, state="readonly")
         self.anim_combo['values'] = ("Manual", "Rainbow Wave", "Pulse", "Matrix Rain", "Sparkle", "Text", "Scrolling Text", "Play Music")
-        self.anim_combo.pack(fill=tk.X, pady=5, padx=5)
+        self.anim_combo.pack(fill=tk.X, pady=2, padx=10)
         self.anim_combo.bind("<<ComboboxSelected>>", self.on_anim_change)
         
-        # Text Controls
-        text_frame = tk.LabelFrame(control_frame, text=" Text Settings ", bg="#222", fg="#aaa", font=("Consolas", 9, "bold"))
-        text_frame.pack(fill=tk.X, pady=5, padx=5)
-        
+        text_frame = tk.LabelFrame(tab_anim, text=" Text Settings ", bg="#1a1a1a", fg="#aaa", font=("Consolas", 9))
+        text_frame.pack(fill=tk.X, pady=10, padx=10)
         self.text_var = tk.StringVar(value="HELLO")
         tk.Entry(text_frame, textvariable=self.text_var, bg="#111", fg="#0f0", font=("Consolas", 9), insertbackground="white").pack(fill=tk.X, padx=5, pady=5)
         
-        spin_frame = tk.Frame(text_frame, bg="#222")
-        spin_frame.pack(fill=tk.X, padx=5)
-        tk.Label(spin_frame, text="X:", bg="#222", fg="#aaa", font=("Consolas", 8)).pack(side=tk.LEFT)
-        self.text_x = tk.Spinbox(spin_frame, from_=-100, to=BOARD_WIDTH, width=4)
-        self.text_x.pack(side=tk.LEFT, padx=(0, 5))
-        
-        tk.Label(spin_frame, text="Y:", bg="#222", fg="#aaa", font=("Consolas", 8)).pack(side=tk.LEFT)
-        self.text_y = tk.Spinbox(spin_frame, from_=-100, to=BOARD_HEIGHT, width=4)
-        self.text_y.pack(side=tk.LEFT)
-        
-        rot_frame = tk.Frame(text_frame, bg="#222")
-        rot_frame.pack(fill=tk.X, pady=5, padx=5)
-        tk.Label(rot_frame, text="Rot:", bg="#222", fg="#aaa", font=("Consolas", 8)).pack(side=tk.LEFT)
-        self.text_rot = ttk.Combobox(rot_frame, values=("0", "90", "180", "270"), width=4)
+        grid_frame = tk.Frame(text_frame, bg="#1a1a1a")
+        grid_frame.pack(padx=5, pady=5)
+        tk.Label(grid_frame, text="X:", bg="#1a1a1a", fg="#888", font=("Consolas", 8)).grid(row=0, column=0)
+        self.text_x = tk.Spinbox(grid_frame, from_=-100, to=BOARD_WIDTH, width=4)
+        self.text_x.grid(row=0, column=1, padx=2)
+        tk.Label(grid_frame, text="Y:", bg="#1a1a1a", fg="#888", font=("Consolas", 8)).grid(row=0, column=2)
+        self.text_y = tk.Spinbox(grid_frame, from_=-100, to=BOARD_HEIGHT, width=4)
+        self.text_y.grid(row=0, column=3, padx=2)
+
+        tk.Label(grid_frame, text="Rot:", bg="#1a1a1a", fg="#888", font=("Consolas", 8)).grid(row=1, column=0, pady=5)
+        self.text_rot = ttk.Combobox(grid_frame, values=("0", "90", "180", "270"), width=4)
         self.text_rot.set("0")
-        self.text_rot.pack(side=tk.LEFT, padx=(0, 4))
+        self.text_rot.grid(row=1, column=1, padx=2, pady=5)
+        tk.Label(grid_frame, text="Sz:", bg="#1a1a1a", fg="#888", font=("Consolas", 8)).grid(row=1, column=2, pady=5)
+        self.text_size = tk.Spinbox(grid_frame, from_=1, to=10, width=4)
+        self.text_size.grid(row=1, column=3, padx=2, pady=5)
 
-        tk.Label(rot_frame, text="Size:", bg="#222", fg="#aaa", font=("Consolas", 8)).pack(side=tk.LEFT)
-        self.text_size = tk.Spinbox(rot_frame, from_=1, to=10, width=3)
-        self.text_size.pack(side=tk.LEFT)
-
-        tk.Label(control_frame, text="COLORS", bg="#222", fg="#888", font=("Consolas", 10, "bold")).pack(pady=(10, 2))
-        
-        # Custom Color Button
-        self.btn_custom = tk.Button(control_frame, text="Pick Custom Color", command=self.pick_color, bg="#444", fg="white", font=("Consolas", 9), relief="flat")
-        self.btn_custom.pack(fill=tk.X, pady=2, padx=5)
-        
-        colors_frame = tk.Frame(control_frame, bg="#222")
-        colors_frame.pack(fill=tk.X, padx=5)
-        
+        # 3. TAB COLORS
+        tab_colors = tk.Frame(notebook, bg="#1a1a1a")
+        notebook.add(tab_colors, text="Colors")
+        self.btn_custom = tk.Button(tab_colors, text="Pick Custom Color", command=self.pick_color, bg="#333", fg="white", font=("Consolas", 9, "bold"), relief="flat")
+        self.btn_custom.pack(fill=tk.X, pady=10, padx=10)
+        colors_frame = tk.Frame(tab_colors, bg="#1a1a1a")
+        colors_frame.pack(fill=tk.X, padx=10)
         colors = [
             ("Red", RED), ("Green", GREEN), ("Blue", BLUE),
             ("Yellow", YELLOW), ("Cyan", CYAN), ("Magenta", MAGENTA),
             ("Orange", ORANGE), ("White", WHITE), ("OFF", BLACK)
         ]
-        
         for i, (name, col) in enumerate(colors):
             btn = tk.Button(colors_frame, text=name, command=lambda c=col: self.set_color(c), font=("Consolas", 8, "bold"), relief="flat")
             fg = "black" if sum(col) > 300 else "white" 
-            hex_col = self.rgb_to_hex(col)
-            if name == "OFF": hex_col = "#111"
+            hex_col = self.rgb_to_hex(col) if name != "OFF" else "#111"
             btn.configure(bg=hex_col, fg=fg)
-            btn.grid(row=i//2, column=i%2, sticky="ew", padx=1, pady=1)
-            
+            btn.grid(row=i//2, column=i%2, sticky="ew", padx=2, pady=2)
         colors_frame.grid_columnconfigure(0, weight=1)
         colors_frame.grid_columnconfigure(1, weight=1)
 
-        # search_bar section
-        tk.Label(control_frame, text="MUSIC ENGINE", bg="#222", fg="#888", font=("Consolas", 10, "bold")).pack(pady=(15, 2))
-        
-        music_frame = tk.LabelFrame(control_frame, text=" YouTube Search ", bg="#222", fg="#aaa", font=("Consolas", 9, "bold"))
-        music_frame.pack(fill=tk.X, pady=5, padx=5)
-        
+        # 4. TAB MUSIC
+        tab_music = tk.Frame(notebook, bg="#1a1a1a")
+        notebook.add(tab_music, text="Music")
+        tk.Label(tab_music, text="Youtube Search", bg="#1a1a1a", fg="#888", font=("Consolas", 9)).pack(pady=(10, 2))
         self.music_search_var = tk.StringVar()
-        search_entry = tk.Entry(music_frame, textvariable=self.music_search_var, bg="#111", fg="#00d4ff", font=("Consolas", 9), insertbackground="white")
-        search_entry.pack(fill=tk.X, padx=5, pady=5)
-        
-        # search by enter
+        search_entry = tk.Entry(tab_music, textvariable=self.music_search_var, bg="#111", fg="#00d4ff", font=("Consolas", 9), insertbackground="white")
+        search_entry.pack(fill=tk.X, padx=10, pady=5)
         search_entry.bind("<Return>", lambda e: self.start_music_search())
-        
-        tk.Button(music_frame, text="🔍 Search & Play", command=self.start_music_search, bg="#333", fg="white", font=("Consolas", 8, "bold"), relief="flat").pack(fill=tk.X, padx=5, pady=2)
-        tk.Button(music_frame, text="⏹ Stop Music", command=self.stop_music, bg="#442222", fg="white", font=("Consolas", 8), relief="flat").pack(fill=tk.X, padx=5, pady=(2, 5))
-        
-        self.lbl_music_status = tk.Label(music_frame, text="Ready", bg="#222", fg="#666", font=("Consolas", 8))
-        self.lbl_music_status.pack(pady=2)
-        # end search_bar section
+        tk.Button(tab_music, text="🔍 Search & Play", command=self.start_music_search, bg="#224", fg="white", font=("Consolas", 9, "bold"), relief="flat").pack(fill=tk.X, padx=10, pady=5)
+        tk.Button(tab_music, text="⏹ Stop Music", command=self.stop_music, bg="#442222", fg="white", font=("Consolas", 9, "bold"), relief="flat").pack(fill=tk.X, padx=10, pady=5)
+        self.lbl_music_status = tk.Label(tab_music, text="Ready", bg="#1a1a1a", fg="#666", font=("Consolas", 8), wraplength=180)
+        self.lbl_music_status.pack(pady=10)
 
-        self.lbl_net_status = tk.Label(control_frame, text=f"Target: {self.network.target_ip}\nPort OUT:{self.network.send_port} | IN:{CONFIG.get('recv_port')}", bg="#222", fg="#66aa66", font=("Consolas", 8), justify=tk.LEFT)
-        self.lbl_net_status.pack(pady=10)
+        self.open_dashboard()
 
-        
+    def open_dashboard(self):
+        if getattr(self, 'dashboard', None) is None or not self.dashboard.winfo_exists():
+            self.dashboard = DashboardUI(self.root)
+            self.dashboard.update_lives(self.lives)
+            self.dashboard.update_score(getattr(self, 'score', 0))
+        else:
+            self.dashboard.lift()
+
+    def _is_on_island(self, x, y):
+        for isl in self.active_islands:
+            if isl.x <= x < isl.x + 3 and isl.y <= y < isl.y + 3:
+                return True
+        return False
+
+    def _check_obstacle_missclick(self, x, y):
+        if getattr(self, 'animation_mode', '') != "Play Music" or getattr(self, 'is_counting_down', False):
+            return False
+            
+        if self._is_on_island(x, y):
+            return False
+            
+        is_on_obstacle = False
+        for obs in self.active_obstacles:
+            for dx, dy in obs.shape:
+                if int(obs.x + dx) == x and int(obs.y + dy) == y:
+                    is_on_obstacle = True
+                    break
+            if is_on_obstacle: break
+            
+        if is_on_obstacle:
+            self.lives -= 1
+            self.last_hit_time = time.time()
+            
+            if hasattr(self, 'dashboard') and self.dashboard and self.dashboard.winfo_exists():
+                self.dashboard.update_lives(self.lives)
+                
+            print(f"Ai apăsat direct pe un OBSTACOL! Vieți: {self.lives}")
+            
+            fake_pt = points(id=int(time.time()*1000), x=x, y=y, color=WHITE)
+            if not hasattr(self, 'active_points'): self.active_points = []
+            self.active_points.append(fake_pt)
+
+            if self.lives <= 0:
+                self.root.after(0, getattr(self, 'game_over', lambda: print("Game Over!")))
+            else:
+                def clear_fake(p=fake_pt):
+                    if p in getattr(self, 'active_points', []):
+                        self.active_points.remove(p)
+                self.root.after(500, clear_fake)
+                
+            return True
+        return False
+
+    def _point_loop(self):
+        if self.is_sending and not getattr(self, 'is_counting_down', False) and getattr(self, 'animation_mode', '') == "Play Music":
+            self.spawn_point()
+        self.root.after(3000, self._point_loop)
 
     def _open_config(self):
         ConfigDialog(self.root, CONFIG, self._on_config_saved)
@@ -416,18 +465,14 @@ class MatrixGUI(GameDesignMixin):
         global CONFIG
         CONFIG = new_cfg
         _save_config(CONFIG)
-        
         self.network.target_ip = CONFIG["device_ip"]
         self.network.send_port = CONFIG["send_port"]
         if "bind_ip" in CONFIG:
             self.network.set_interface(CONFIG["bind_ip"])
-        
         self.port_out_var.set(str(CONFIG["send_port"]))
         self.port_in_var.set(str(CONFIG["recv_port"]))
-        
         self._bind_receiver()
         self.lbl_net_status.config(text=f"Target: {self.network.target_ip}\nPort OUT:{self.network.send_port} | IN:{CONFIG.get('recv_port')}")
-        print(f"Matrix_GUI: Config updated.")
 
     def _bind_receiver(self):
         p_in = int(self.port_in_var.get())
@@ -438,9 +483,8 @@ class MatrixGUI(GameDesignMixin):
         self.sock_recv.settimeout(0.5)
         try:
             self.sock_recv.bind(("0.0.0.0", p_in))
-            print(f"Matrix_GUI: Trigger receiver bound to port {p_in}")
         except Exception as e:
-            print(f"Matrix_GUI: Failed to bind trigger receiver to {p_in}: {e}")
+            print(f"Matrix_GUI: Failed to bind trigger receiver: {e}")
 
     def receiver_loop(self):
         while self.receiver_running:
@@ -455,11 +499,63 @@ class MatrixGUI(GameDesignMixin):
                             if self.trigger_states.get((ch, led), False) != state:
                                 self.trigger_states[(ch, led)] = state
                                 changed = True
-                                print(f"Matrix_GUI PARSED trigger change: ch={ch}, led={led}, state={state}")
+                                
+                                if state == True:
+                                    row_in_ch = led // 16
+                                    y = ch * 4 + row_in_ch
+                                    x = led % 16 if row_in_ch % 2 == 0 else 15 - (led % 16)
+                                        
+                                    point_processed = False
+                                    if hasattr(self, 'active_points'):
+                                        for pt in self.active_points:
+                                            if int(pt.x) == x and int(pt.y) == y:
+                                                point_processed = True
+                                                if pt.color == WHITE:
+                                                    break 
+                                                    
+                                                is_on_obstacle = False
+                                                if not self._is_on_island(x, y):
+                                                    for obs in self.active_obstacles:
+                                                        for dx, dy in obs.shape:
+                                                            if int(obs.x + dx) == x and int(obs.y + dy) == y:
+                                                                is_on_obstacle = True
+                                                                break
+                                                        if is_on_obstacle: break
+                                                    
+                                                if is_on_obstacle:
+                                                    pt.color = WHITE
+                                                    self.lives -= 1
+                                                    self.last_hit_time = time.time()
+                                                    
+                                                    if hasattr(self, 'dashboard') and self.dashboard and self.dashboard.winfo_exists():
+                                                        self.dashboard.update_lives(self.lives)
+                                                        
+                                                    print(f"Ai lovit obstacolul la colectare! Punctul e ALB. Vieți: {self.lives}")
+                                                
+                                                    if self.lives <= 0:
+                                                        self.root.after(0, getattr(self, 'game_over', lambda: None))
+                                                    else:
+                                                        def clear_bad_point(p=pt):
+                                                            if p in getattr(self, 'active_points', []):
+                                                                self.active_points.remove(p)
+                                                            self.root.after(3000, getattr(self, 'spawn_point', lambda: None))
+                                                        self.root.after(500, clear_bad_point)
+                                                else:
+                                                    self.active_points.remove(pt)
+                                                    self.score += 10 
+                                                    
+                                                    if hasattr(self, 'dashboard') and self.dashboard and self.dashboard.winfo_exists():
+                                                        self.dashboard.update_score(self.score)
+                                                        
+                                                    print(f"Punct colectat corect ({x},{y}). Respawn în 3 secunde.")
+                                                    self.root.after(3000, getattr(self, 'spawn_point', lambda: None))
+                                                break
+                                    
+                                    if not point_processed:
+                                        self._check_obstacle_missclick(x, y)
+                                        
                     if changed:
                         self.root.after(0, self.draw_grid)
-                elif data[0] == 0x88:
-                    print(f"Matrix_GUI DROPPED 0x88 packet because len was only {len(data)}")
             except socket.timeout:
                 continue
             except Exception as e:
@@ -474,7 +570,6 @@ class MatrixGUI(GameDesignMixin):
                         if addr.address not in ips:
                             ips.append(addr.address)
         except: pass
-        self.iface_combo['values'] = ips
 
     def on_anim_change(self, event):
         self.animation_mode = self.anim_var.get()
@@ -485,10 +580,9 @@ class MatrixGUI(GameDesignMixin):
 
     def pick_color(self):
         color = colorchooser.askcolor(title="Choose Color")
-        if color[0]: # If a color was selected (not None)
+        if color[0]: 
             rgb = (int(color[0][0]), int(color[0][1]), int(color[0][2]))
             self.set_color(rgb)
-            # Update button visual
             self.btn_custom.config(bg=color[1], fg="black" if sum(rgb) > 300 else "white")
 
     def set_color(self, color):
@@ -502,17 +596,67 @@ class MatrixGUI(GameDesignMixin):
     def on_resize(self, event):
         w = event.width
         h = event.height
-        
-        # Calculate max cell size that fits
         cell_w = w / self.grid_width
         cell_h = h / self.grid_height
         self.cell_size = min(cell_w, cell_h)
         self.draw_grid()
 
     def paint(self, event):
-        if self.animation_mode != "Manual": return
         x = int(event.x // self.cell_size)
         y = int(event.y // self.cell_size)
+
+        point_processed = False
+        if hasattr(self, 'active_points'):
+            for pt in self.active_points:
+                if int(pt.x) == x and int(pt.y) == y:
+                    point_processed = True
+                    if pt.color == WHITE:
+                        return 
+                        
+                    is_on_obstacle = False
+                    if not self._is_on_island(x, y):
+                        for obs in self.active_obstacles:
+                            for dx, dy in obs.shape:
+                                if int(obs.x + dx) == x and int(obs.y + dy) == y:
+                                    is_on_obstacle = True
+                                    break
+                            if is_on_obstacle: break
+                        
+                    if is_on_obstacle:
+                        pt.color = WHITE
+                        self.lives -= 1
+                        self.last_hit_time = time.time()
+                        
+                        if hasattr(self, 'dashboard') and self.dashboard and self.dashboard.winfo_exists():
+                            self.dashboard.update_lives(self.lives)
+                            
+                        print(f"Ai lovit obstacolul la colectare! Punctul e ALB. Vieți: {self.lives}")
+
+                        if self.lives <= 0:
+                            if hasattr(self, 'game_over'): self.game_over()
+                        else:
+                            def clear_bad_point(p=pt):
+                                if p in getattr(self, 'active_points', []):
+                                    self.active_points.remove(p)
+                                self.root.after(3000, getattr(self, 'spawn_point', lambda: None))
+                            self.root.after(500, clear_bad_point)
+                    else:
+                        self.active_points.remove(pt)
+                        self.score += 10 
+                        
+                        if hasattr(self, 'dashboard') and self.dashboard and self.dashboard.winfo_exists():
+                            self.dashboard.update_score(self.score)
+                            
+                        self.grid_data[(x, y)] = BLACK
+                        print(f"Point collected! Respawn în 3 secunde.")
+                        self.root.after(3000, getattr(self, 'spawn_point', lambda: None))
+                    return 
+
+        if not point_processed:
+            if self._check_obstacle_missclick(x, y):
+                return
+
+        if self.animation_mode != "Manual": return
         
         if 0 <= x < self.grid_width and 0 <= y < self.grid_height:
             self.grid_data[(x, y)] = self.current_color
@@ -538,9 +682,7 @@ class MatrixGUI(GameDesignMixin):
 
     def draw_grid(self, custom_grid=None):
         self.canvas.delete("all")
-
         display_grid = custom_grid if custom_grid is not None else self.grid_data
-
         for y in range(self.grid_height):
             for x in range(self.grid_width):
                 self.draw_cell(x, y, self.grid_data[(x, y)])
@@ -556,13 +698,11 @@ class MatrixGUI(GameDesignMixin):
             self.btn_send.config(text="START STREAM", bg="green")
 
     def set_led(self, buffer, x, y, color):
-        # Mapping Logic
         if x < 0 or x >= 16: return
         channel = y // 4
         if channel >= 8: return
         row_in_channel = y % 4
         
-        # Zig-Zag logic derived from Tetris_Game
         if row_in_channel % 2 == 0: led_index = row_in_channel * 16 + x
         else: led_index = row_in_channel * 16 + (15 - x)
         
@@ -570,9 +710,40 @@ class MatrixGUI(GameDesignMixin):
         offset = led_index * block_size + channel
         
         if offset + NUM_CHANNELS*2 < len(buffer):
-            buffer[offset] = color[1] # Green/Red Swap
-            buffer[offset + NUM_CHANNELS] = color[0] # Green/Red Swap
+            buffer[offset] = color[1] 
+            buffer[offset + NUM_CHANNELS] = color[0] 
             buffer[offset + NUM_CHANNELS*2] = color[2]
+
+    # --- HELPER METODA PENTRU PIXELI CUVINTE INTRO ---
+    def _get_word_pixels(self, word):
+        pixels = []
+        if word == "HAVE":
+            for y in range(5): pixels.append((1,y)); pixels.append((3,y))
+            pixels.append((2,2))
+            pixels.extend([(5,1),(5,2),(5,3),(5,4), (6,0),(6,2), (7,1),(7,2),(7,3),(7,4)])
+            pixels.extend([(9,0),(9,1),(9,2),(9,3), (10,4), (11,0),(11,1),(11,2),(11,3)])
+            for y in range(5): pixels.append((13,y))
+            pixels.extend([(14,0),(15,0), (14,2),(15,2), (14,4),(15,4)])
+        elif word == "FUN":
+            for y in range(5): pixels.append((2,y))
+            pixels.extend([(3,0),(4,0), (3,2),(4,2)])
+            for y in range(4): pixels.append((6,y)); pixels.append((8,y))
+            pixels.extend([(7,4)])
+            for y in range(5): pixels.append((10,y)); pixels.append((13,y))
+            pixels.extend([(11,1), (12,2)])
+        elif word == ":)":
+            pixels.extend([(5,1), (5,3)])
+            pixels.extend([(7,0),(8,0),(9,1),(9,2),(9,3),(8,4),(7,4)])
+        elif word == ":(":
+            pixels.extend([(5,1), (5,3)])
+            pixels.extend([(9,0),(8,0),(7,1),(7,2),(7,3),(8,4),(9,4)])
+        elif word == "1":
+            pixels.extend([(1,0), (0,1), (1,1), (1,2), (1,3), (0,4), (1,4), (2,4)])
+        elif word == "2":
+            pixels.extend([(0,0),(1,0),(2,0), (2,1), (0,2),(1,2),(2,2), (0,3), (0,4),(1,4),(2,4)])
+        elif word == "3":
+            pixels.extend([(0,0),(1,0),(2,0), (2,1), (0,2),(1,2),(2,2), (2,3), (0,4),(1,4),(2,4)])
+        return pixels
 
     def render_frame(self):
         buffer = bytearray(FRAME_DATA_LENGTH)
@@ -581,14 +752,65 @@ class MatrixGUI(GameDesignMixin):
             current_grid = self.grid_data.copy()
         else:
             current_grid = self.generate_animation_frame()
+        
+        if getattr(self, 'is_counting_down', False):
+            self.draw_border(current_grid) 
+            # ---- DESENAM 3 2 1 IN ULTIMELE 3 SECUNDE ----
+            c = getattr(self, 'current_countdown', 0)
+            if 1 <= c <= 3:
+                pixels = self._get_word_pixels(str(c))
+                x_offset = 6
+                y_offset = (BOARD_HEIGHT - 5) // 2
+                for px, py in pixels:
+                    if 0 <= px + x_offset < BOARD_WIDTH and 0 <= py + y_offset < BOARD_HEIGHT:
+                        current_grid[(px + x_offset, py + y_offset)] = YELLOW
+        elif self.animation_mode == "Play Music":
+            self.draw_points(current_grid)
+            self.draw_islands(current_grid)
 
-        # obstacles only if the song has started
-        if self.active_obstacles and not self.is_counting_down:
-            self.update_and_draw_obstacles(current_grid)
-
-        # green border only if the players are waitnig
-        if self.is_counting_down:
-            self.draw_border(current_grid)
+            if getattr(self, 'active_obstacles', []):
+                self.update_and_draw_obstacles(current_grid)
+                self.draw_islands(current_grid)
+                
+            # --- CONTINUOUS COLLISION CHECK ---
+            now = time.time()
+            if not hasattr(self, 'last_hit_time'): self.last_hit_time = 0
+            if now - self.last_hit_time > 1.0: # 1 secundă de invulnerabilitate după o lovitură
+                hit = False
+                hit_x, hit_y = -1, -1
+                for (ch, led), is_pressed in self.trigger_states.items():
+                    if is_pressed:
+                        row_in_ch = led // 16
+                        y = ch * 4 + row_in_ch
+                        x = led % 16 if row_in_ch % 2 == 0 else 15 - (led % 16)
+                        
+                        if not self._is_on_island(x, y):
+                            for obs in getattr(self, 'active_obstacles', []):
+                                for dx, dy in obs.shape:
+                                    if int(obs.x + dx) == x and int(obs.y + dy) == y:
+                                        hit = True
+                                        hit_x, hit_y = x, y
+                                        break
+                                if hit: break
+                    if hit: break
+                
+                if hit:
+                    self.last_hit_time = now
+                    self.lives -= 1
+                    if hasattr(self, 'dashboard') and self.dashboard and self.dashboard.winfo_exists():
+                        self.dashboard.update_lives(self.lives)
+                    print(f"Obstacol a trecut peste un buton menținut apăsat! Vieți: {self.lives}")
+                    fake_pt = points(id=int(now*1000), x=hit_x, y=hit_y, color=WHITE)
+                    if not hasattr(self, 'active_points'): self.active_points = []
+                    self.active_points.append(fake_pt)
+                    if self.lives <= 0:
+                        self.root.after(0, getattr(self, 'game_over', lambda: None))
+                    else:
+                        def clear_fake(p=fake_pt):
+                            if p in getattr(self, 'active_points', []):
+                                self.active_points.remove(p)
+                        self.root.after(500, clear_fake)
+            # ----------------------------------
 
         for (x, y), color in current_grid.items():
             self.set_led(buffer, x, y, color)
@@ -600,8 +822,6 @@ class MatrixGUI(GameDesignMixin):
 
     def generate_animation_frame(self):
         frame_grid = {}
-        
-        # black frame
         for y in range(BOARD_HEIGHT):
             for x in range(BOARD_WIDTH):
                 frame_grid[(x, y)] = BLACK
@@ -638,16 +858,45 @@ class MatrixGUI(GameDesignMixin):
                 rx, ry = random.randint(0, BOARD_WIDTH-1), random.randint(0, BOARD_HEIGHT-1)
                 frame_grid[(rx, ry)] = (255, 255, 255)
 
-        elif self.animation_mode in ["Text", "Scrolling Text"]:
-            pass 
+        elif self.animation_mode == "Intro Sequence":
+            word = getattr(self, 'intro_words', [""])[getattr(self, 'intro_word_index', 0)]
+            alpha = getattr(self, 'intro_alpha', 0.0)
+            green_val = int(255 * max(0.0, min(1.0, alpha)))
+            color = (0, green_val, 0)
+            
+            pixels = self._get_word_pixels(word)
+            y_offset = (BOARD_HEIGHT - 5) // 2
+            
+            for px, py in pixels:
+                if 0 <= px < BOARD_WIDTH and 0 <= py + y_offset < BOARD_HEIGHT:
+                    frame_grid[(px, py + y_offset)] = color
+            
+        elif self.animation_mode == "Game Over Fade":
+            if not hasattr(self, 'game_over_alpha'):
+                self.game_over_alpha = 0.0
+            
+            if self.game_over_alpha < 1.0:
+                self.game_over_alpha += 0.02
+                if self.game_over_alpha > 1.0: 
+                    self.game_over_alpha = 1.0
+            
+            current_red = int(255 * self.game_over_alpha)
+            
+            sad_pixels = self._get_word_pixels(":(")
+            y_offset = (BOARD_HEIGHT - 5) // 2
+            sad_pixels_abs = [(px, py + y_offset) for px, py in sad_pixels]
+            
+            for y in range(BOARD_HEIGHT):
+                for x in range(BOARD_WIDTH):
 
-        elif self.animation_mode == "Play Music":
-            pass 
+                    if (x, y) in sad_pixels_abs:
+                        frame_grid[(x, y)] = BLACK
+                    else:
+                        frame_grid[(x, y)] = (current_red, 0, 0)
         
         else: 
             return self.grid_data.copy()
         
-
         return frame_grid
 
     def sending_loop(self):
@@ -657,19 +906,15 @@ class MatrixGUI(GameDesignMixin):
         while self.is_sending:
             music_active = state.current_player is not None and state.current_player.poll() is None
             
-            if music_active and not self.is_counting_down:
-                # spawn each 0.5
+            if music_active and not getattr(self, 'is_counting_down', False):
                 self.next_spawn_in -= 1
-                
-                # timer done
                 if self.next_spawn_in <= 0:
-                    self.spawn_random_obstacle()
-                    # reset interval
+                    if hasattr(self, 'spawn_random_obstacle'):
+                        self.spawn_random_obstacle()
                     self.next_spawn_in = random.randint(15, 60)
 
             frame = self.render_frame()
             self.network.send_packet(frame)
-            
             self.time_counter += 1
             time.sleep(0.05)
 
@@ -694,11 +939,8 @@ class ConfigDialog(tk.Toplevel):
         self._build()
 
     def _build(self):
-        pad = {'padx': 15, 'pady': 5, 'sticky': "we"}
-        
         tk.Label(self, text="NETWORK SETTINGS", bg="#2a2a2a", fg="#ff8844", font=("Consolas", 10, "bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 5), sticky="we")
 
-        # Fields
         self._field("Target IP:", self.sv_ip, 1)
         self._field("Port OUT (Send):", self.sv_send, 2)
         self._field("Port IN (Recv):", self.sv_recv, 3)
@@ -711,26 +953,20 @@ class ConfigDialog(tk.Toplevel):
                        activebackground="#1a1a1a", activeforeground="white",
                        font=("Consolas", 9)).grid(row=4, column=0, columnspan=3, padx=10, pady=4, sticky="w")
 
-        # Discovery
         tk.Label(self, text="DEVICE DISCOVERY", bg="#2a2a2a", fg="#ff8844", font=("Consolas", 10, "bold")).grid(row=4, column=0, columnspan=3, padx=10, pady=(15, 5), sticky="we")
         self.lbl_disc = tk.Label(self, text="Ready to scan...", bg="#1a1a1a", fg="#888", font=("Consolas", 8))
         self.lbl_disc.grid(row=5, column=0, columnspan=2, padx=15, pady=5, sticky="w")
-        
         tk.Button(self, text="🔍 Discover", command=self._discover, bg="#224", fg="white", font=("Consolas", 9, "bold"), relief="flat").grid(row=5, column=2, padx=10, pady=5, sticky="we")
 
-        # Interface
         tk.Label(self, text="LOCAL INTERFACE", bg="#2a2a2a", fg="#ff8844", font=("Consolas", 10, "bold")).grid(row=6, column=0, columnspan=3, padx=10, pady=(15, 5), sticky="we")
         
         self.iface_combo = ttk.Combobox(self, textvariable=self.sv_iface, state="readonly")
         self.iface_combo.grid(row=7, column=0, columnspan=2, padx=15, pady=5, sticky="we")
         self._load_interfaces()
-        
         tk.Button(self, text="Refresh", command=self._load_interfaces, bg="#333", fg="white", font=("Consolas", 8), relief="flat").grid(row=7, column=2, padx=10, pady=5, sticky="we")
 
-        # Buttons
         btn_frame = tk.Frame(self, bg="#1a1a1a")
         btn_frame.grid(row=8, column=0, columnspan=3, pady=15)
-        
         tk.Button(btn_frame, text="💾 Save", command=self._save, bg="#226", fg="white", font=("Consolas", 9, "bold"), relief="flat", padx=15, pady=6).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Cancel", command=self.destroy, bg="#333", fg="white", font=("Consolas", 9), relief="flat", padx=15, pady=6).pack(side=tk.LEFT, padx=5)
 
@@ -756,20 +992,10 @@ class ConfigDialog(tk.Toplevel):
     def _discover(self):
         from tkinter import messagebox
         iface = self.sv_iface.get()
-        try:
-            port = int(self.sv_send.get())
+        try: port = int(self.sv_send.get())
         except: port = 4626
         
         self.lbl_disc.config(text="Scanning...", fg="#ffaa00")
-        
-        # Access Controller app through parent
-        # But ConfigDialog doesn't have a direct reference to the MatrixGUI app instance
-        # Let's pass it in or find it.
-        # For simplicity, we can instantiate a temporary NetworkManager or just use socket directly in _thread.
-        # I already implemented discover() in NetworkManager, but I need an instance.
-        
-        from tkinter import messagebox
-        
         def callback(devices):
             if devices:
                 names = "\n".join([f"{d['name']}" for d in devices])
@@ -778,8 +1004,6 @@ class ConfigDialog(tk.Toplevel):
                 messagebox.showinfo("Discovered", f"Found devices:\n{names}")
             else:
                 self.lbl_disc.config(text="No devices found", fg="#ff4444")
-        
-        # We need a NetworkManager instance. We can create a temp one.
         temp_net = NetworkManager()
         temp_net.discover(iface, port, callback)
 
