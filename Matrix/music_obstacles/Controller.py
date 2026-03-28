@@ -18,6 +18,8 @@ from song_search_engine import searchOnlineFiles, play_song
 import state
 # for obstacles
 from obstacole_structures import line, column, shuriken, arrow, bubble
+# code modularization -> game_design
+from game_design import GameDesignMixin
 
 # --- Constants ---
 UDP_SEND_IP = "255.255.255.255"
@@ -246,7 +248,7 @@ class NetworkManager:
             self.sock_send.sendto(end_packet, ("127.0.0.1", port))
         except: pass
 
-class MatrixGUI:
+class MatrixGUI(GameDesignMixin):
     def __init__(self, root):
         self.root = root
         self.root.title("Matrix GUI Controller (16x32)")
@@ -575,26 +577,22 @@ class MatrixGUI:
     def render_frame(self):
         buffer = bytearray(FRAME_DATA_LENGTH)
         
-        # 1. Stratul de jos (Manual sau Animație)
         if self.animation_mode == "Manual":
             current_grid = self.grid_data.copy()
         else:
             current_grid = self.generate_animation_frame()
 
-        # 2. Stratul de mijloc: OBSTACOLE (Dacă a început melodia)
-        # Observă că adăugăm "not self.is_counting_down"
+        # obstacles only if the song has started
         if self.active_obstacles and not self.is_counting_down:
             self.update_and_draw_obstacles(current_grid)
 
-        # 3. Stratul de sus: BORDURA VERDE (DOAR în timpul așteptării)
+        # green border only if the players are waitnig
         if self.is_counting_down:
             self.draw_border(current_grid)
 
-        # 4. Trimitem tot "pachetul" de straturi către placa ta matrix
         for (x, y), color in current_grid.items():
             self.set_led(buffer, x, y, color)
 
-        # 5. Sincronizăm Simulatorul (să vezi bordura pe ecran!)
         if self.time_counter % 2 == 0:
             self.root.after(0, lambda: self.draw_grid(current_grid))
 
@@ -602,14 +600,14 @@ class MatrixGUI:
 
     def generate_animation_frame(self):
         frame_grid = {}
-        # 1. Fundal Negru (Curățăm matricea)
+        
+        # black frame
         for y in range(BOARD_HEIGHT):
             for x in range(BOARD_WIDTH):
                 frame_grid[(x, y)] = BLACK
 
         t = self.time_counter * 0.1
         
-        # 2. Logica de fundal (Rainbow, Pulse, etc.)
         if self.animation_mode == "Rainbow Wave":
             for y in range(BOARD_HEIGHT):
                 for x in range(BOARD_WIDTH):
@@ -641,13 +639,12 @@ class MatrixGUI:
                 frame_grid[(rx, ry)] = (255, 255, 255)
 
         elif self.animation_mode in ["Text", "Scrolling Text"]:
-            # Rămâne logica ta de font aici. Asigură-te doar că adaugă pixelii în frame_grid.
             pass 
 
         elif self.animation_mode == "Play Music":
-            pass # Rămâne fundalul negru
+            pass 
         
-        else: # Modul Manual
+        else: 
             return self.grid_data.copy()
         
 
@@ -667,114 +664,6 @@ class MatrixGUI:
             self.time_counter += 1
             time.sleep(0.05)
 
-    # border
-    def draw_border(self, grid):
-        for x in range(BOARD_WIDTH):
-            grid[(x, 0)] = GREEN
-            grid[(x, BOARD_HEIGHT - 1)] = GREEN
-        for y in range(BOARD_HEIGHT):
-            grid[(0, y)] = GREEN
-            grid[(BOARD_WIDTH - 1, y)] = GREEN
-
-    def draw_grid(self, custom_grid=None):
-        self.canvas.delete("all")
-
-        display_grid = custom_grid if custom_grid is not None else self.grid_data
-        
-        for y in range(self.grid_height):
-            for x in range(self.grid_width):
-                color = display_grid.get((x, y), BLACK)
-                self.draw_cell(x, y, color)
-
-    # search_engine methods
-    def start_music_search(self):
-        query = self.music_search_var.get().strip()
-        if not query: return
-        
-        self.lbl_music_status.config(text="🔍 Searching...", fg="#ffaa00")
-        # Folosim threading pentru ca interfața să nu "înghețe" în timpul căutării
-        threading.Thread(target=self._music_worker, args=(query,), daemon=True).start()
-
-    def _music_worker(self, query):
-        try:
-            results = searchOnlineFiles(query, limit=1)
-            if results and 'url' in results[0]:
-                url = results[0]['url']
-                title = results[0]['title']
-
-                self.root.after(0, lambda: self.start_game_countdown(url, title, 10))
-            else:
-                self.root.after(0, lambda: self.lbl_music_status.config(text="❌ Not found", fg="#ff4444"))
-        except Exception as e:
-            self.root.after(0, lambda: self.lbl_music_status.config(text="Error in search", fg="red"))
-
-    def stop_music(self):
-        if state.current_player:
-            state.current_player.terminate()
-            state.current_player = None
-            self.lbl_music_status.config(text="⏹ Stopped", fg="#888")
-    # end of search_engine methods
-
-    # obstacle methods
-    def update_and_draw_obstacles(self, frame_grid):
-        for obs in self.active_obstacles:
-            # move logic
-            # column: left -> right
-            if isinstance(obs, column):
-                obs.x += obs.speed 
-            # anything else: up -> down
-            else:
-                obs.y += obs.speed 
-            
-            # draw stuff
-            for dx, dy in obs.shape:
-                px, py = int(obs.x + dx), int(obs.y + dy)
-                if 0 <= px < BOARD_WIDTH and 0 <= py < BOARD_HEIGHT:
-                    frame_grid[(px, py)] = obs.color
-        
-        # clean stuff
-        self.active_obstacles = [o for o in self.active_obstacles if o.y < BOARD_HEIGHT and o.x < BOARD_WIDTH]
-    
-    def spawn_random_obstacle(self):
-        obs_types = [line, shuriken, arrow, bubble, column]
-        chosen_type = random.choice(obs_types)
-        new_id = int(time.time())
-        
-        if chosen_type == line:
-            # line: starts from x=0, y=-1 + fall
-            new_id = chosen_type(id=new_id, x=0, y=-1, speed=0.5, color=RED)
-        elif chosen_type == column:
-            # column: starts from  x=-1, y=0 to the left
-            new_id = chosen_type(id=new_id, x=-1, y=0, speed=0.5, color=RED)
-        else:
-            # up -> down from a random x
-            random_x = random.randint(1, 13)
-            new_id = chosen_type(id=new_id, x=random_x, y=-5, speed=0.5, color=RED)
-            
-        self.active_obstacles.append(new_id)
-        # end of object methods
-
-    # game methods
-    def start_game_countdown(self, url, title, count):
-
-        if not self.is_sending:
-            self.toggle_sending()
-            
-        self.anim_var.set("Play Music")
-        self.animation_mode = "Play Music"
-
-        if count > 0:
-            self.is_counting_down = True
-            self.lbl_music_status.config(text=f"🚀 Game starts in {count}s...", fg="#ffaa00")
-            # check again after a second
-            self.root.after(1000, lambda: self.start_game_countdown(url, title, count - 1))
-        else:
-            self.is_counting_down = False
-            self.active_obstacles = []
-            # finish countdown 
-            self.lbl_music_status.config(text=f"🎵 Now playing: {title[:20]}", fg="#00ff00")
-            
-            play_song(url)
 
 class ConfigDialog(tk.Toplevel):
     def __init__(self, parent, cfg, on_save):

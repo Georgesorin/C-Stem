@@ -32,12 +32,6 @@ class shuriken(obstacle):
     def __post_init__(self):
         self.shape = [(1, 0), (0, 1), (1, 1), (2, 1), (1, 2)]
 
-# arrow structure
-@dataclass
-class arrow(obstacle):
-    def __post_init__(self):
-        self.shape = [(1, 0), (0, 1), (1, 1), (2, 1), (1, 2), (1, 3)]
-
 # bubble structure
 @dataclass
 class bubble(obstacle):
@@ -46,4 +40,42 @@ class bubble(obstacle):
             (1, 0), (2, 0),
             (0, 1), (3, 1), (0, 2), (3, 2),
             (1, 3), (2, 3)
+        ]
+
+
+@dataclass
+class arrow(obstacle):
+    def __post_init__(self):
+        self.shape = [
+            (1, 0), (1, 1),          
+            (0, 2), (1, 2), (2, 2),   
+            (1, 3)                    
+        ]
+
+@dataclass
+class diag1(obstacle):
+    def __post_init__(self):
+        self.shape = [(4, 0), (3, 1), (2, 2), (1, 3), (0, 4)]
+
+@dataclass
+class diag2(obstacle):
+    def __post_init__(self):
+        self.shape = [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)]
+
+@dataclass
+class chess(obstacle):
+    def __post_init__(self):
+        self.shape = [
+            (0, 0), (2, 0),
+            (1, 1),
+            (0, 2), (2, 2)
+        ]
+
+@dataclass
+class diamond(obstacle):
+    def __post_init__(self):
+        self.shape = [
+            (1, 0),
+            (0, 1), (1, 1), (2, 1),
+            (1, 2)
         ]
