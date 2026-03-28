@@ -6,6 +6,7 @@ import threading
 from config import *
 from matrix_io import MatrixHardware
 from ui import DashboardUI
+from audio_manager import AudioManager
 
 class NaturalDisasterGame:
     def __init__(self):
@@ -13,6 +14,8 @@ class NaturalDisasterGame:
         # Îi pasăm UI-ului funcția pe care să o apeleze când se alege numărul de jucători
         self.ui = DashboardUI(self.start_game_logic) 
         
+        self.audio = AudioManager()
+
         self.num_players = 2
         self.score = 0
         self.lives = 0
@@ -41,6 +44,8 @@ class NaturalDisasterGame:
         self.ui.update_score(self.score)
         self.ui.update_lives(self.lives)
         
+        self.audio.play_bgm()
+
         # Pornim bucla de joc pe un fir secundar ca să nu blocăm interfața grafică
         threading.Thread(target=self.game_loop, daemon=True).start()
 
@@ -65,11 +70,13 @@ class NaturalDisasterGame:
                 self.active_splashes.remove(s)
                 self.splashing_positions.discard((sx, sy))
 
-    def register_hit(self, px, py):
+    def register_hit(self, px, py, hit_type):
         self.active_splashes.append({'x': px, 'y': py, 'life': 6})
         self.splashing_positions.add((px, py))
         self.lives -= 1
         self.ui.update_lives(self.lives)
+
+        self.audio.play(hit_type)
 
     # --- LOGICĂ JOCURI ---
     def play_lava(self):
@@ -104,7 +111,7 @@ class NaturalDisasterGame:
                 
                 # Dacă piciorul e în lavă și nu e pe insulă -> ARSURĂ!
                 if dist < lava_radius and not on_island:
-                    self.register_hit(px, py)
+                    self.register_hit(px, py, "splash")
 
             # 3. Desenăm exploziile/splash-ul folosind culoarea LAVA_SPLASH (Galben aprins)
             self.draw_splashes(frame, COLORS["LAVA_SPLASH"])
@@ -138,12 +145,14 @@ class NaturalDisasterGame:
                 elif timer > 0:
                     for dx in [-1, 0, 1]:
                         for dy in [-1, 0, 1]: self.hw.set_pixel_physical(frame, mx+dx, my+dy, COLORS["METEOR_IMPACT"])
-                    if timer == 1: self.craters.append({'x': mx, 'y': my, 'life': 100})
+                    if timer == 1: 
+                        self.craters.append({'x': mx, 'y': my, 'life': 100})
+                        self.audio.play("meteor_boom")
                     
                     for px, py in self.hw.pressed_buttons:
                         if (px, py) in self.splashing_positions: continue
                         if abs(px - mx) <= 1 and abs(py - my) <= 1:
-                            self.register_hit(px, py) 
+                            self.register_hit(px, py, "damage") 
                             
                 m['timer'] -= 1
                 if m['timer'] <= -4: self.meteors.remove(m)
@@ -185,6 +194,8 @@ class NaturalDisasterGame:
                     self.fire_pixels.remove((px, py))
                     self.score += 1 
                     self.ui.update_score(self.score)
+
+                    self.audio.play("fire_out")
                     
                     if not any(s['x'] == px and s['y'] == py for s in self.active_splashes):
                         self.active_splashes.append({'x': px, 'y': py, 'life': 4})
@@ -227,6 +238,7 @@ class NaturalDisasterGame:
             
             self.ui.update_dashboard("PREGĂTIRE...", "Stai pe poziții!", "white")
             for count in ['3', '2', '1']:
+                self.audio.play("countdown")
                 for _ in range(25):
                     frame = bytearray(1536); self.draw_base(frame)
                     for px, py in DIGITS[count]: self.hw.set_pixel_physical(frame, 7+px, 14+py, COLORS["WHITE"])
@@ -247,8 +259,11 @@ class NaturalDisasterGame:
                 time.sleep(3.0)
 
         # GAME OVER SEQUENCE
+        self.audio.stop_bgm()
+        self.audio.play("game_over")
         self.ui.show_game_over(self.score)
         
+
         # Facem podeaua roșie pentru 10 secunde
         frame = bytearray(1536)
         for y in range(HEIGHT):
