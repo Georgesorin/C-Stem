@@ -14,7 +14,7 @@ Sound effect de reusita/
 
 Tot asa pana cand o sa fie mai multe patrate de apasat
 
-Exista un timer in care jucatorul trebuie sa apese patratele in ordinea corecta pentru fiecare runa
+Exista un timer in care jucatorul trebuie sa apese patratele in ordinea corecta pentru fiecare runda
 
 Daca jucatorul da fail trebuie sa o ia de la capat de la prima runda
 
