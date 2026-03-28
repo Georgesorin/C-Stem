@@ -81,18 +81,19 @@ class NetworkManager:
         self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.running = True
         self.sequence_number = 0
-        self.bind_ip = "0.0.0.0"
+        
+        # --- LOGICA DE BIND IDENTICĂ CU CEA DIN TETRIS ---
+        self.bind_ip = CONFIG.get("bind_ip", "0.0.0.0")
         self.target_ip = CONFIG.get("device_ip", "255.255.255.255")
         self.send_port = CONFIG.get("send_port", 4626)
         
-    def _auto_bind(self):
-        try:
-            for iface, addrs in psutil.net_if_addrs().items():
-                for addr in addrs:
-                    if addr.family == socket.AF_INET and addr.address.startswith("169.254"):
-                        self.set_interface(addr.address)
-                        return
-        except: pass
+        if self.bind_ip != "0.0.0.0":
+            try:
+                self.sock_send.bind((self.bind_ip, 0))
+                print(f"Sender bound to {self.bind_ip}")
+            except Exception as e:
+                print(f"Warning: Could not bind send socket to {self.bind_ip} (Routing via default): {e}")
+        # ------------------------------------------------
 
     def set_interface(self, ip):
         if self.bind_ip == ip: return

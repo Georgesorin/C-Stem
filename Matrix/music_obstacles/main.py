@@ -1,28 +1,20 @@
+import tkinter as tk
+from Controller import MatrixGUI
 import sys
-from song_search_engine import searchOnlineFiles
-from song_search_engine import play_song
 
+def main():
+    root = tk.Tk()
+    
+    app = MatrixGUI(root)
+    
+    print("Aplicația Matrix LED a pornit!")
+    
+    # Pornim bucla principală a interfeței grafice
+    root.mainloop()
 
-def listen_for_input():
-    while True:
-        line = sys.stdin.readline()
-        if not line:
-            break
-
-        query = line.strip()
-        result = searchOnlineFiles(query, limit = 1)
-
-        if result:
-            print(f"RESULT: {result[0]['url']}")
-            sys.stdout.flush()  
-            play_song(result[0]['url'])
-            
-        
-
-if __name__ == "__main__" :
-    listen_for_input()
-
-
-
-
-
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nAplicația a fost închisă din terminal.")
+        sys.exit(0)
