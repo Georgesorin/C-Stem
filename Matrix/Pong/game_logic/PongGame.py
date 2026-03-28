@@ -16,15 +16,17 @@ class Player:
         self.score = 0
     
     def move_to(self, target_x):
-        # Limite noi pentru a nu intra în bordura VERDE (x=0 și x=15)
-        # Paleta are lățime 4. 
-        # Cea mai din stânga poziție permisă este x=1 (pentru că x=0 e verde)
-        # Cea mai din dreapta poziție pentru capătul stâng al paletei este 10 
-        # (astfel încât x+width-1, adică 10+4-1 = 13, să fie înainte de x=15)
+        # Calculăm noua poziție astfel încât target_x să fie MIJLOCUL
+        # Scădem jumătate din lățime (4 // 2 = 2)
+        new_x = target_x - 1
         
-        new_x = target_x
-        if new_x < 1: new_x = 1
-        if new_x > 11: new_x = 11 
+        # Limite pentru ca paleta să nu iasă din bordurile verzi (x=0 și x=15)
+        # Marginea stângă minimă: 1
+        # Marginea stângă maximă: 15 - 4 = 11
+        if new_x < 1: 
+            new_x = 1
+        if new_x > 11: 
+            new_x = 11 
         
         self.x = new_x
 
@@ -98,7 +100,7 @@ class Ball:
     
 class PongGame:
     def __init__(self):
-        self.button_states = [False] * 64
+        self.button_states = [False] * 512
         self.p1 = Player(1, RED)
         self.p2 = Player(2, BLUE)
         self.ball = Ball()
@@ -124,38 +126,34 @@ class PongGame:
             x_real = 15 - x_raw
             
         return x_real, y_real
+    
+    def get_coords_512(self, index):
+        y = index // 16   # Rândul real (0 - 31)
+        x_raw = index % 16 # Coloana brută (0 - 15)
+
+        # Zig-Zag: Rândurile impare (1, 3, 5... 31) sunt inversate
+        if y % 2 == 0:
+            x = x_raw
+        else:
+            x = 15 - x_raw
+        return x, y
 
     def tick(self):
         with self.lock:
             self.ball.update(self.p1, self.p2)
+            found_p1 = False
+            found_p2 = False
 
-            for i in range(64):
+            for i in range(512):
                 if self.button_states[i]:
-                    # 1. Aflăm coloana (x) și fâșia (0-3)
-                    strip = i // 16
-                    x_raw = i % 16
-                    
-                    # 2. Logica Zig-Zag pentru x (foarte importantă!)
-                    # Dacă fâșia este impară (1 sau 3), x-ul este inversat în pachet
-                    if strip % 2 == 0:
-                        x = x_raw
-                    else:
-                        x = 15 - x_raw
-
-                    # 3. Maparea pe Jucători (Zonarea)
-                    # Indiferent ce rânduri sunt în realitate, împărțim pachetul în două:
-                    
-                    # Dacă atingerea e în prima jumătate a pachetului (Fâșiile 0 și 1)
-                    if strip <= 1:
-                        self.p1.move_to(x) # Îl mișcăm pe cel ROȘU
-                    
-                    # Dacă atingerea e în a doua jumătate (Fâșiile 2 și 3)
-                    else:
-                        self.p2.move_to(x) # Îl mișcăm pe cel ALBASTRU
-                    
-                    # Nu punem break aici dacă vrem să permitem ambilor să se miște simultan
-                    # Dar pentru teste, break-ul ajută la stabilitate
-                    break
+                    x, y = self.get_coords_512(i)
+                    if y < 16 and not found_p1:
+                        self.p1.move_to(x)
+                        found_p1 = True
+                    elif y >= 16 and not found_p2:
+                        self.p2.move_to(x)
+                        found_p2 = True
+                if found_p1 and found_p2: break
 
     def set_led(self, buffer, target_x, target_y, color):
         # Aceasta este funcția de ZIG-ZAG pe care ai trimis-o tu

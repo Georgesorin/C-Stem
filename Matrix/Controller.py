@@ -93,14 +93,19 @@ class NetworkManager:
         while self.running:
             try:
                 data, addr = self.sock_recv.recvfrom(2048)
-                if len(data) >= 1373 and data[0] == 0x88 and self.game:
-                    offset = 2 + (7 * 171) + 1 
-                    # MODIFICARE: Citim doar 64, așa cum ai vrut
-                    ch8_data = data[offset : offset + 64]
-                    for i, val in enumerate(ch8_data):
-                        # Actualizăm starea în joc (doar primii 64)
-                        if i < len(self.game.button_states):
-                            self.game.button_states[i] = (val == 0xCC)
+                # Verificăm header-ul și lungimea pachetului (1370+ bytes)
+                if len(data) >= 1370 and data[0] == 0x88 and self.game:
+                    # Colectăm datele din toate cele 8 canale (8 * 64 = 512)
+                    for ch in range(8):
+                        base = 2 + ch * 171
+                        for led in range(64):
+                            # Indexul global (0 - 511)
+                            idx_global = ch * 64 + led
+                            # Starea senzorului (0xCC înseamnă apăsat)
+                            state = (data[base + 1 + led] == 0xCC)
+                            
+                            if idx_global < len(self.game.button_states):
+                                self.game.button_states[idx_global] = state
             except: pass
 
     def start_bg(self):
