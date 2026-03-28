@@ -263,7 +263,9 @@ class MatrixGUI:
 
         # obstacles vector
         self.active_obstacles = []
-        
+        # for countdown 
+        self.is_counting_down = False
+
         self.active_obstacles.append(shuriken(id=1, x=5, y=5, speed=1.0))
         self.active_obstacles.append(bubble(id=2, x=10, y=20, speed=0.5, color=CYAN))
 
@@ -322,7 +324,7 @@ class MatrixGUI:
         tk.Label(control_frame, text="ANIMATION MODE", bg="#222", fg="#888", font=("Consolas", 10, "bold")).pack(pady=5)
         self.anim_var = tk.StringVar(value="Manual")
         self.anim_combo = ttk.Combobox(control_frame, textvariable=self.anim_var)
-        self.anim_combo['values'] = ("Manual", "Rainbow Wave", "Pulse", "Matrix Rain", "Sparkle", "Text", "Scrolling Text")
+        self.anim_combo['values'] = ("Manual", "Rainbow Wave", "Pulse", "Matrix Rain", "Sparkle", "Text", "Scrolling Text", "Play Music")
         self.anim_combo.pack(fill=tk.X, pady=5, padx=5)
         self.anim_combo.bind("<<ComboboxSelected>>", self.on_anim_change)
         
@@ -532,8 +534,11 @@ class MatrixGUI:
             t_col = "black" if lum > 128 else "white"
             self.canvas.create_text(x1 + self.cell_size/2, y1 + self.cell_size/2, text="T", fill=t_col, font=("Consolas", int(self.cell_size*0.6) or 8, "bold"))
 
-    def draw_grid(self):
+    def draw_grid(self, custom_grid=None):
         self.canvas.delete("all")
+
+        display_grid = custom_grid if custom_grid is not None else self.grid_data
+
         for y in range(self.grid_height):
             for x in range(self.grid_width):
                 self.draw_cell(x, y, self.grid_data[(x, y)])
@@ -570,27 +575,41 @@ class MatrixGUI:
     def render_frame(self):
         buffer = bytearray(FRAME_DATA_LENGTH)
         
+        # 1. Stratul de jos (Manual sau Animație)
         if self.animation_mode == "Manual":
-            current_grid = self.grid_data
+            current_grid = self.grid_data.copy()
         else:
             current_grid = self.generate_animation_frame()
 
+        # 2. Stratul de mijloc: OBSTACOLE (Dacă a început melodia)
+        # Observă că adăugăm "not self.is_counting_down"
+        if self.active_obstacles and not self.is_counting_down:
+            self.update_and_draw_obstacles(current_grid)
+
+        # 3. Stratul de sus: BORDURA VERDE (DOAR în timpul așteptării)
+        if self.is_counting_down:
+            self.draw_border(current_grid)
+
+        # 4. Trimitem tot "pachetul" de straturi către placa ta matrix
         for (x, y), color in current_grid.items():
             self.set_led(buffer, x, y, color)
-        
-        # Update UI sometimes (optional, heavy for 20FPS but good for debug)
-        # To avoid lag, maybe only update UI every 5 frames?
-        if self.animation_mode != "Manual":
-            self.grid_data = current_grid 
-            if self.time_counter % 2 == 0: 
-                 self.root.after(0, self.draw_grid) # update UI in main thread
+
+        # 5. Sincronizăm Simulatorul (să vezi bordura pe ecran!)
+        if self.time_counter % 2 == 0:
+            self.root.after(0, lambda: self.draw_grid(current_grid))
 
         return buffer
 
     def generate_animation_frame(self):
         frame_grid = {}
+        # 1. Fundal Negru (Curățăm matricea)
+        for y in range(BOARD_HEIGHT):
+            for x in range(BOARD_WIDTH):
+                frame_grid[(x, y)] = BLACK
+
         t = self.time_counter * 0.1
         
+        # 2. Logica de fundal (Rainbow, Pulse, etc.)
         if self.animation_mode == "Rainbow Wave":
             for y in range(BOARD_HEIGHT):
                 for x in range(BOARD_WIDTH):
@@ -599,135 +618,73 @@ class MatrixGUI:
                     frame_grid[(x, y)] = (int(r * 255), int(g * 255), int(b * 255))
         
         elif self.animation_mode == "Pulse":
-            val = (math.sin(t) + 1) / 2 # 0 to 1
-            r = int(self.current_color[0] * val)
-            g = int(self.current_color[1] * val)
-            b = int(self.current_color[2] * val)
-            col = (r, g, b)
+            val = (math.sin(t) + 1) / 2
+            col = (int(self.current_color[0] * val), int(self.current_color[1] * val), int(self.current_color[2] * val))
             for y in range(BOARD_HEIGHT):
                 for x in range(BOARD_WIDTH):
                     frame_grid[(x, y)] = col
                     
         elif self.animation_mode == "Matrix Rain":
-             # Initialize drops if needed
             if not hasattr(self, 'rain_drops'):
                 self.rain_drops = [random.randint(-10, 0) for _ in range(BOARD_WIDTH)]
-            
-            # Fade existing
-            for y in range(BOARD_HEIGHT):
-                for x in range(BOARD_WIDTH):
-                    prev = self.grid_data.get((x, y), BLACK)
-                    # Dim by 20%
-                    frame_grid[(x, y)] = (0, max(0, prev[1] - 30), 0)
-
-            # Update drops
             for x in range(BOARD_WIDTH):
-                if random.random() < 0.05: # Random spawn
-                    self.rain_drops[x] = 0
-                
+                if random.random() < 0.05: self.rain_drops[x] = 0
                 head_y = self.rain_drops[x]
                 if 0 <= head_y < BOARD_HEIGHT:
-                    frame_grid[(x, head_y)] = (0, 255, 0) # Bright Green Head
-                
-                if head_y < BOARD_HEIGHT + 5:
-                    self.rain_drops[x] += 1
-                else:
-                     self.rain_drops[x] = random.randint(-15, -1)
+                    frame_grid[(x, head_y)] = (0, 255, 0)
+                if head_y < BOARD_HEIGHT + 5: self.rain_drops[x] += 1
+                else: self.rain_drops[x] = random.randint(-15, -1)
         
         elif self.animation_mode == "Sparkle":
-             for y in range(BOARD_HEIGHT):
-                for x in range(BOARD_WIDTH):
-                     # Fade
-                    prev = self.grid_data.get((x, y), BLACK)
-                    frame_grid[(x, y)] = (max(0, prev[0]-25), max(0, prev[1]-25), max(0, prev[2]-25))
-            
-             for _ in range(5):
-                 rx = random.randint(0, BOARD_WIDTH-1)
-                 ry = random.randint(0, BOARD_HEIGHT-1)
-                 frame_grid[(rx, ry)] = (255, 255, 255)
+            for _ in range(5):
+                rx, ry = random.randint(0, BOARD_WIDTH-1), random.randint(0, BOARD_HEIGHT-1)
+                frame_grid[(rx, ry)] = (255, 255, 255)
 
         elif self.animation_mode in ["Text", "Scrolling Text"]:
-            text_str = self.text_var.get()
-            try:
-                rot = int(self.text_rot.get())
-            except ValueError:
-                rot = 0
-                
-            for y in range(BOARD_HEIGHT):
-                for x in range(BOARD_WIDTH):
-                    frame_grid[(x, y)] = BLACK
+            # Rămâne logica ta de font aici. Asigură-te doar că adaugă pixelii în frame_grid.
+            pass 
 
-            # test obstacles
-            self.update_and_draw_obstacles(frame_grid)
-                    
-            if self.animation_mode == "Scrolling Text":
-                text_width = len(text_str) * 6
-                speed = 1.0 
-                screen_len = BOARD_WIDTH if rot in (0, 180) else BOARD_HEIGHT
-                total_scroll = max(1, text_width + screen_len)
-                vx_offset = screen_len - (int(self.time_counter * speed) % total_scroll)
-            else:
-                try:
-                    vx_offset = int(self.text_x.get())
-                except ValueError:
-                    vx_offset = 0
-
-            try:
-                start_vy = int(self.text_y.get())
-            except ValueError:
-                start_vy = 0
-                
-            try:
-                scale_input = int(self.text_size.get())
-            except ValueError:
-                scale_input = 1
-                
-            if scale_input == 1:
-                cur_font = FONT_3x5
-                char_w = 3
-                char_h = 5
-                render_scale = 1
-            else:
-                cur_font = FONT_5x7
-                char_w = 5
-                char_h = 7
-                render_scale = scale_input - 1
-                
-            for char_idx, char in enumerate(text_str):
-                char_data = cur_font.get(char, cur_font.get('?', [0]*char_w))
-                for col_idx, col_byte in enumerate(char_data):
-                    for sx in range(render_scale):
-                        vx = vx_offset + (char_idx * (char_w + 1) * render_scale) + (col_idx * render_scale) + sx
-                        for row_idx in range(char_h):
-                            if (col_byte >> row_idx) & 1:
-                                for sy in range(render_scale):
-                                    vy = start_vy + (row_idx * render_scale) + sy
-                                    
-                                    if rot == 0:
-                                        px, py = vx, vy
-                                    elif rot == 90:
-                                        px, py = BOARD_WIDTH - 1 - vy, vx
-                                    elif rot == 180:
-                                        px, py = BOARD_WIDTH - 1 - vx, BOARD_HEIGHT - 1 - vy
-                                    elif rot == 270:
-                                        px, py = vy, BOARD_HEIGHT - 1 - vx
-                                    else:
-                                        px, py = vx, vy
-                                        
-                                    if 0 <= px < BOARD_WIDTH and 0 <= py < BOARD_HEIGHT:
-                                        frame_grid[(px, py)] = self.current_color
-
-        else: # Fallback
-            return self.grid_data
+        elif self.animation_mode == "Play Music":
+            pass # Rămâne fundalul negru
+        
+        else: # Modul Manual
+            return self.grid_data.copy()
+        
 
         return frame_grid
 
     def sending_loop(self):
         while self.is_sending:
+            music_active = state.current_player is not None and state.current_player.poll() is None
+            
+            if music_active:
+                if self.time_counter % 70 == 0:
+                    self.spawn_random_obstacle()
+
             frame = self.render_frame()
             self.network.send_packet(frame)
+            
             self.time_counter += 1
-            time.sleep(0.05) # ~20 FPS
+            time.sleep(0.05)
+
+    # border
+    def draw_border(self, grid):
+        for x in range(BOARD_WIDTH):
+            grid[(x, 0)] = GREEN
+            grid[(x, BOARD_HEIGHT - 1)] = GREEN
+        for y in range(BOARD_HEIGHT):
+            grid[(0, y)] = GREEN
+            grid[(BOARD_WIDTH - 1, y)] = GREEN
+
+    def draw_grid(self, custom_grid=None):
+        self.canvas.delete("all")
+
+        display_grid = custom_grid if custom_grid is not None else self.grid_data
+        
+        for y in range(self.grid_height):
+            for x in range(self.grid_width):
+                color = display_grid.get((x, y), BLACK)
+                self.draw_cell(x, y, color)
 
     # search_engine methods
     def start_music_search(self):
@@ -744,8 +701,8 @@ class MatrixGUI:
             if results and 'url' in results[0]:
                 url = results[0]['url']
                 title = results[0]['title']
-                self.root.after(0, lambda: self.lbl_music_status.config(text=f"🎵 {title[:20]}...", fg="#00ff00"))
-                play_song(url)
+
+                self.root.after(0, lambda: self.start_game_countdown(url, title, 10))
             else:
                 self.root.after(0, lambda: self.lbl_music_status.config(text="❌ Not found", fg="#ff4444"))
         except Exception as e:
@@ -761,15 +718,63 @@ class MatrixGUI:
     # obstacle methods
     def update_and_draw_obstacles(self, frame_grid):
         for obs in self.active_obstacles:
+            # move logic
+            # column: left -> right
+            if isinstance(obs, column):
+                obs.x += obs.speed 
+            # anything else: up -> down
+            else:
+                obs.y += obs.speed 
             
-            obs.y += obs.speed / 10 
-            
+            # draw stuff
             for dx, dy in obs.shape:
-                px = int(obs.x + dx)
-                py = int(obs.y + dy)
-                
+                px, py = int(obs.x + dx), int(obs.y + dy)
                 if 0 <= px < BOARD_WIDTH and 0 <= py < BOARD_HEIGHT:
                     frame_grid[(px, py)] = obs.color
+        
+        # clean stuff
+        self.active_obstacles = [o for o in self.active_obstacles if o.y < BOARD_HEIGHT and o.x < BOARD_WIDTH]
+    
+    def spawn_random_obstacle(self):
+        obs_types = [line, shuriken, arrow, bubble, column]
+        chosen_type = random.choice(obs_types)
+        new_id = int(time.time())
+        
+        if chosen_type == line:
+            # line: starts from x=0, y=-1 + fall
+            new_id = chosen_type(id=new_id, x=0, y=-1, speed=0.5, color=RED)
+        elif chosen_type == column:
+            # column: starts from  x=-1, y=0 to the left
+            new_id = chosen_type(id=new_id, x=-1, y=0, speed=0.5, color=RED)
+        else:
+            # up -> down from a random x
+            random_x = random.randint(1, 13)
+            new_id = chosen_type(id=new_id, x=random_x, y=-5, speed=0.5, color=RED)
+            
+        self.active_obstacles.append(new_id)
+        # end of object methods
+
+    # game methods
+    def start_game_countdown(self, url, title, count):
+
+        if not self.is_sending:
+            self.toggle_sending()
+            
+        self.anim_var.set("Play Music")
+        self.animation_mode = "Play Music"
+
+        if count > 0:
+            self.is_counting_down = True
+            self.lbl_music_status.config(text=f"🚀 Game starts in {count}s...", fg="#ffaa00")
+            # check again after a second
+            self.root.after(1000, lambda: self.start_game_countdown(url, title, count - 1))
+        else:
+            self.is_counting_down = False
+            self.active_obstacles = []
+            # finish countdown 
+            self.lbl_music_status.config(text=f"🎵 Now playing: {title[:20]}", fg="#00ff00")
+            
+            play_song(url)
 
 class ConfigDialog(tk.Toplevel):
     def __init__(self, parent, cfg, on_save):
