@@ -3,7 +3,7 @@ import time
 import random
 from song_search_engine import searchOnlineFiles, play_song
 import state
-from obstacole_structures import line, column, shuriken, arrow, bubble
+from obstacole_structures import line, column, shuriken, arrow, bubble, diag1, diag2, diamond, chess
 
 # constants
 BOARD_WIDTH = 16
@@ -68,17 +68,17 @@ class GameDesignMixin:
         self.active_obstacles = [o for o in self.active_obstacles if o.y < BOARD_HEIGHT and o.x < BOARD_WIDTH]
     
     def spawn_random_obstacle(self):
-        obs_types = [line, shuriken, arrow, bubble, column]
+        obs_types = [line, shuriken, arrow, bubble, column, diag1, diag2, diamond, chess]
         chosen_type = random.choice(obs_types)
         new_id = int(time.time())
         
         if chosen_type == line:
-            new_obs = chosen_type(id=new_id, x=0, y=-1, speed=0.5, color=RED)
+            new_obs = chosen_type(id=new_id, x=0, y=-1, speed=1.0, color=RED)
         elif chosen_type == column:
-            new_obs = chosen_type(id=new_id, x=-1, y=0, speed=0.5, color=RED)
+            new_obs = chosen_type(id=new_id, x=-1, y=0, speed=1.0, color=RED)
         else:
             random_x = random.randint(1, 13)
-            new_obs = chosen_type(id=new_id, x=random_x, y=-5, speed=0.5, color=RED)
+            new_obs = chosen_type(id=new_id, x=random_x, y=-5, speed=0.7, color=RED)
             
         self.active_obstacles.append(new_obs)
 
