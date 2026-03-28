@@ -7,24 +7,17 @@ import tkinter as tk
 from Controller import NetworkManager
 
 # ==========================================
-# 1. CONFIGURAȚIE ECHIPĂ ȘI REȚEA
+# 1. CONFIGURAȚIE REȚEA (FĂRĂ NUM_PLAYERS HARDCODAT)
 # ==========================================
-NUM_PLAYERS = 5 # Dificultatea și numărul de insule se adaptează automat la acest număr!
-
 WIDTH, HEIGHT = 16, 32 
 TARGET_IP = "127.0.0.1"
 PORT_SEND = 5001 
 PORT_RECV = 5000 
 
 COLORS = {
-    "GRASS": (0, 80, 0),
-    "ISLAND": (120, 120, 120),
-    "WATER": (0, 0, 255),
-    "METEOR_WARN": (255, 0, 0),
-    "METEOR_IMPACT": (255, 100, 0),
-    "CRATER": (40, 40, 40),
-    "WHITE": (255, 255, 255),
-    "SMOKE": (150, 150, 150)
+    "GRASS": (0, 80, 0), "ISLAND": (120, 120, 120), "WATER": (0, 0, 255),
+    "METEOR_WARN": (255, 0, 0), "METEOR_IMPACT": (255, 100, 0),
+    "CRATER": (40, 40, 40), "WHITE": (255, 255, 255), "SMOKE": (150, 150, 150)
 }
 
 class NaturalDisasterGame:
@@ -35,11 +28,11 @@ class NaturalDisasterGame:
         
         self.running = True
         
-        # --- SISTEMUL DE SCOR ȘI VIEȚI ---
+        # Variabile de joc (vor fi setate la start)
+        self.num_players = 2
         self.score = 0
-        self.lives = min(NUM_PLAYERS, 7) # Maxim 7 vieți
+        self.lives = 0
         
-        # --- SECVENȚA DE JOCURI ---
         self.game_sequence = ["water", "meteors", "fire"]
         self.current_game_index = 0
         
@@ -47,7 +40,6 @@ class NaturalDisasterGame:
         self.meteors = []         
         self.craters = [] 
         self.fire_pixels = set() 
-        
         self.pressed_buttons = set() 
         self.active_splashes = []
         self.splashing_positions = set()
@@ -59,31 +51,78 @@ class NaturalDisasterGame:
         }
         self.all_corners = [(0, 0), (WIDTH-1, 0), (0, HEIGHT-1), (WIDTH-1, HEIGHT-1)]
 
-        # --- DASHBOARD UI ---
+        # --- SETUP INTERFAȚĂ GRAFICĂ (TKINTER) ---
         self.root = tk.Tk()
-        self.root.title("LEDHACK - Dashboard")
-        self.root.geometry("600x500")
+        self.root.title("LEDHACK - Setup & Dashboard")
+        self.root.geometry("800x600")
         self.root.configure(bg="black")
         
-        self.lbl_game = tk.Label(self.root, text="DISASTER SURVIVAL", font=("Consolas", 30, "bold"), bg="black", fg="white")
+       # 1. FRAME-UL DE SETUP (Meniul Principal pe Touchscreen)
+        self.setup_frame = tk.Frame(self.root, bg="black")
+        tk.Label(self.setup_frame, text="DISASTER SURVIVAL", font=("Consolas", 45, "bold"), fg="white", bg="black").pack(pady=(40, 10))
+        tk.Label(self.setup_frame, text="Selectează numărul de jucători:", font=("Consolas", 22), fg="yellow", bg="black").pack(pady=10)
+        
+        # Container pentru butoane (expand=True îl ține perfect pe centru)
+        btn_frame = tk.Frame(self.setup_frame, bg="black")
+        btn_frame.pack(pady=10, expand=True) 
+        
+        for i in range(2, 8): 
+            btn = tk.Button(btn_frame, 
+                            text=str(i),                 
+                            font=("Consolas", 55, "bold"), # Font puțin ajustat
+                            bg="white",                   
+                            fg="black",                   
+                            width=2,                      # Aici era problema! 2 este perfect pentru font 55
+                            height=1,
+                            relief="raised",             
+                            bd=5,                         
+                            activebackground="#DDDDDD",   
+                            command=lambda players=i: self.start_new_game(players))
+            
+            # Am mărit puțin padx/pady ca să aibă aer între ele
+            btn.grid(row=(i-2)//3, column=(i-2)%3, padx=25, pady=20)
+	
+        # 2. FRAME-UL DE JOC (Dashboard-ul)
+        self.game_frame = tk.Frame(self.root, bg="black")
+        self.lbl_game = tk.Label(self.game_frame, text="DISASTER SURVIVAL", font=("Consolas", 35, "bold"), bg="black", fg="white")
         self.lbl_game.pack(pady=20)
         
-        self.lbl_lives = tk.Label(self.root, text="❤️" * self.lives, font=("Consolas", 35), bg="black", fg="red")
-        self.lbl_lives.pack(pady=5)
+        self.lbl_lives = tk.Label(self.game_frame, text="", font=("Consolas", 40), bg="black", fg="red")
+        self.lbl_lives.pack(pady=10)
         
-        self.lbl_instruction = tk.Label(self.root, text="Se încarcă...", font=("Consolas", 18), bg="black", fg="yellow")
+        self.lbl_instruction = tk.Label(self.game_frame, text="Pregătire...", font=("Consolas", 20), bg="black", fg="yellow")
         self.lbl_instruction.pack(pady=10)
         
-        self.lbl_score = tk.Label(self.root, text="SCOR: 0", font=("Consolas", 50, "bold"), bg="black", fg="#00FF00")
-        self.lbl_score.pack(side="bottom", pady=40)
+        self.lbl_score = tk.Label(self.game_frame, text="SCOR: 0", font=("Consolas", 60, "bold"), bg="black", fg="#00FF00")
+        self.lbl_score.pack(side="bottom", pady=50)
 
+        # Afișăm inițial ecranul de Setup
+        self.setup_frame.pack(fill="both", expand=True)
+
+        # Pornim doar listener-ul de butoane în fundal. Logica de joc stă pe pauză.
         threading.Thread(target=self.input_listener, daemon=True).start()
-        threading.Thread(target=self.game_loop, daemon=True).start()
+        
         self.root.mainloop()
 
     # ==========================================
-    # LOGICĂ DE AFIȘARE ȘI RENDERIZARE
+    # LOGICĂ DE TRANZIȚIE UI (SETUP -> JOC)
     # ==========================================
+    def start_new_game(self, players):
+        """Apelat când cineva apasă un buton pe touchscreen"""
+        self.num_players = players
+        self.lives = min(players, 7)
+        self.score = 0
+        self.current_game_index = 0
+        
+        # Ascundem Setup-ul, Arătăm Dashboard-ul
+        self.setup_frame.pack_forget()
+        self.game_frame.pack(fill="both", expand=True)
+        
+        self.update_dashboard("NOU JOC", f"Echipă: {players} Jucători. Succes!", "white")
+        
+        # Acum pornim bucla de joc pe un thread separat!
+        threading.Thread(target=self.game_loop, daemon=True).start()
+
     def update_dashboard(self, status, instr, color="white"):
         self.root.after(0, lambda: self.lbl_game.config(text=status, fg=color))
         self.root.after(0, lambda: self.lbl_instruction.config(text=instr))
@@ -91,6 +130,7 @@ class NaturalDisasterGame:
         self.root.after(0, lambda: self.lbl_lives.config(text="❤️" * max(0, self.lives)))
 
     def show_game_over(self):
+        """Afișează ecranul de Game Over"""
         self.root.after(0, lambda: self.lbl_game.config(text="GAME OVER", fg="red"))
         self.root.after(0, lambda: self.lbl_instruction.config(text="Echipa a fost eliminată!", fg="white"))
         self.root.after(0, lambda: self.lbl_score.config(text=f"PUNCTAJ FINAL: {self.score}", fg="yellow"))
@@ -101,12 +141,14 @@ class NaturalDisasterGame:
             for x in range(WIDTH): self.set_pixel_physical(frame, x, y, (150, 0, 0))
         self.net.send_packet(frame)
 
-    def reset_entire_game(self):
-        self.score = 0
-        self.lives = min(NUM_PLAYERS, 7)
-        self.current_game_index = 0 # O luăm mereu de la capăt când începe o echipă nouă
-        self.update_dashboard("NOU JOC", "Pregătiți-vă!", "white")
+    def return_to_setup(self):
+        """Aduce jocul înapoi la meniul principal pentru o nouă echipă"""
+        self.game_frame.pack_forget()
+        self.setup_frame.pack(fill="both", expand=True)
 
+    # ==========================================
+    # UTILITĂȚI DE DESENARE
+    # ==========================================
     def set_pixel_physical(self, buffer, x, y, color):
         if not (0 <= x < WIDTH and 0 <= y < HEIGHT): return
         channel = y // 4
@@ -136,17 +178,15 @@ class NaturalDisasterGame:
                 self.active_splashes.remove(s)
                 self.splashing_positions.discard((sx, sy))
 
-    # ==========================================
-    # LOGICĂ DE JOCURI
-    # ==========================================
     def register_hit(self, px, py):
-        """Înregistrează o coliziune, scade o viață și generează animația"""
         self.active_splashes.append({'x': px, 'y': py, 'life': 6})
         self.splashing_positions.add((px, py))
         self.lives -= 1
         self.root.after(0, lambda: self.lbl_lives.config(text="❤️" * max(0, self.lives)))
 
-    # --- 1. APĂ ---
+    # ==========================================
+    # LOGICĂ DE JOCURI (Folosesc self.num_players!)
+    # ==========================================
     def play_water(self):
         self.update_dashboard("INUNDAȚIE!", "Refugiază-te pe insule!", "#00AAFF")
         active_corners = random.sample(self.all_corners, k=random.randint(1, 3))
@@ -157,7 +197,6 @@ class NaturalDisasterGame:
             frame = bytearray(1536); self.draw_base(frame)
             water_radius = max_dist * (f / 300.0)
             
-            # Desenăm apa
             for y in range(HEIGHT):
                 for x in range(WIDTH):
                     dist = min([math.sqrt((x-cx)**2 + (y-cy)**2) for cx, cy in active_corners])
@@ -165,7 +204,6 @@ class NaturalDisasterGame:
                         on_island = any(ix <= x < ix+3 and iy <= y < iy+3 for ix, iy, iw, ih in self.islands)
                         if not on_island: self.set_pixel_physical(frame, x, y, COLORS["WATER"])
             
-            # Detecție pași
             for px, py in self.pressed_buttons:
                 if (px, py) in self.splashing_positions: continue
                 dist = min([math.sqrt((px-cx)**2 + (py-cy)**2) for cx, cy in active_corners])
@@ -177,7 +215,6 @@ class NaturalDisasterGame:
             self.net.send_packet(frame); time.sleep(0.04)
         return True
 
-    # --- 2. METEORIȚI ---
     def play_meteors(self):
         self.update_dashboard("METEORIȚI!", "Evită exploziile!", "red")
         
@@ -185,28 +222,23 @@ class NaturalDisasterGame:
             if self.lives <= 0: break 
             frame = bytearray(1536); self.draw_base(frame)
             
-            # Desenăm craterele vechi
             for c in self.craters[:]:
                 for dx in [-1, 0, 1]:
                     for dy in [-1, 0, 1]: self.set_pixel_physical(frame, c['x']+dx, c['y']+dy, COLORS["CRATER"])
                 c['life'] -= 1
                 if c['life'] <= 0: self.craters.remove(c)
                 
-            # Generăm meteoriți
             if f % 15 == 0: self.meteors.append({'x': random.randint(1, WIDTH-2), 'y': random.randint(1, HEIGHT-2), 'timer': 35})
                 
             for m in self.meteors[:]:
                 mx, my, timer = m['x'], m['y'], m['timer']
                 if timer > 8: 
-                    # Warning intermitent
                     if f % 4 == 0: self.set_pixel_physical(frame, mx, my, COLORS["METEOR_WARN"])
                 elif timer > 0:
-                    # Explozie portocalie
                     for dx in [-1, 0, 1]:
                         for dy in [-1, 0, 1]: self.set_pixel_physical(frame, mx+dx, my+dy, COLORS["METEOR_IMPACT"])
                     if timer == 1: self.craters.append({'x': mx, 'y': my, 'life': 100})
                     
-                    # Coliziune cu jucătorii
                     for px, py in self.pressed_buttons:
                         if (px, py) in self.splashing_positions: continue
                         if abs(px - mx) <= 1 and abs(py - my) <= 1:
@@ -219,19 +251,16 @@ class NaturalDisasterGame:
             self.net.send_packet(frame); time.sleep(0.04)
         return True
 
-    # --- 3. INCENDIU DE PĂDURE ---
     def play_fire(self):
         self.update_dashboard("INCENDIU!", "Calcă pe foc să-l stingi!", "orange")
         
-        # Focare inițiale dinamice
-        num_focare = max(2, NUM_PLAYERS // 2 + 1)
+        num_focare = max(2, self.num_players // 2 + 1)
         for _ in range(num_focare):
             self.fire_pixels.add((random.randint(1, WIDTH-2), random.randint(1, HEIGHT-2)))
             
-        # Dificultate adaptivă (Interval și Șansă)
-        spread_interval = max(3, 12 - NUM_PLAYERS) 
-        spread_chance = 0.05 + (NUM_PLAYERS * 0.03) 
-        max_fire_pixels = int((WIDTH * HEIGHT) * 0.40) # Prag de 40% (aprox 204 pixeli)
+        spread_interval = max(3, 12 - self.num_players) 
+        spread_chance = 0.05 + (self.num_players * 0.03) 
+        max_fire_pixels = int((WIDTH * HEIGHT) * 0.40) 
         
         round_survived = True
 
@@ -239,7 +268,6 @@ class NaturalDisasterGame:
             if self.lives <= 0: break
             frame = bytearray(1536); self.draw_base(frame)
             
-            # 1. Extinderea Focului
             if f % spread_interval == 0:
                 new_fires = set()
                 for fx, fy in self.fire_pixels:
@@ -251,18 +279,16 @@ class NaturalDisasterGame:
                                 new_fires.add((nx, ny))
                 self.fire_pixels.update(new_fires)
             
-            # 2. Stingerea Focului (Interacțiune jucători)
             for px, py in list(self.pressed_buttons):
                 if (px, py) in self.fire_pixels:
                     self.fire_pixels.remove((px, py))
-                    self.score += 1 # Punct obținut prin stingere
+                    self.score += 1 
                     self.root.after(0, lambda: self.lbl_score.config(text=f"SCOR: {self.score}"))
                     
                     if not any(s['x'] == px and s['y'] == py for s in self.active_splashes):
                         self.active_splashes.append({'x': px, 'y': py, 'life': 4})
                         self.splashing_positions.add((px, py))
 
-            # 3. CONDIȚIA DE EȘEC (> 40%)
             if len(self.fire_pixels) > max_fire_pixels: 
                 self.update_dashboard("FOC SCĂPAT DE SUB CONTROL!", "Prea mult foc! Se pierde o viață...", "red")
                 self.lives -= 1
@@ -276,7 +302,6 @@ class NaturalDisasterGame:
                 round_survived = False
                 break
 
-            # 4. Desenăm focul
             for fx, fy in self.fire_pixels:
                 fire_color = (255, random.randint(20, 100), 0) 
                 self.set_pixel_physical(frame, fx, fy, fire_color)
@@ -290,26 +315,18 @@ class NaturalDisasterGame:
     # ENGINE & LOOP PRINCIPAL
     # ==========================================
     def game_loop(self):
-        while self.running:
-            # Game Over Check
-            if self.lives <= 0:
-                self.show_game_over()
-                time.sleep(10.0) 
-                self.reset_entire_game()
-                continue
-            
-            # Resetăm nivelul (inclusiv insulele adaptate la NUM_PLAYERS)
+        """Rulează jocurile doar cât timp echipa mai are vieți"""
+        while self.lives > 0:
             self.active_splashes.clear()
             self.splashing_positions.clear()
             self.meteors.clear()
             self.craters.clear()
             self.fire_pixels.clear()
             
-            min_islands = max(2, NUM_PLAYERS // 2 + 1)
+            min_islands = max(2, self.num_players // 2 + 1)
             num_islands = random.randint(min_islands, min_islands + 1)
             self.islands = [[random.randint(1, WIDTH-4), random.randint(1, HEIGHT-4), 3, 3] for _ in range(num_islands)]
             
-            # Countdown
             self.update_dashboard("PREGĂTIRE...", "Stai pe poziții!")
             for count in ['3', '2', '1']:
                 for _ in range(25):
@@ -319,8 +336,6 @@ class NaturalDisasterGame:
 
             # --- ALEGERE SECVENȚIALĂ A JOCULUI ---
             game_mode = self.game_sequence[self.current_game_index]
-            
-            # Trecem la următorul index (0 -> 1 -> 2 -> 0)
             self.current_game_index = (self.current_game_index + 1) % len(self.game_sequence)
             
             round_success = True
@@ -328,14 +343,20 @@ class NaturalDisasterGame:
             elif game_mode == "meteors": round_success = self.play_meteors()
             else: round_success = self.play_fire()
 
-            # Scorul de supraviețuire (dacă runda s-a terminat cu bine)
+            # Scorul de supraviețuire
             if self.lives > 0 and round_success:
                 self.score += self.lives 
                 self.update_dashboard("RUNDĂ TERMINATĂ!", f"+{self.lives} Puncte de Supraviețuire!", "green")
                 time.sleep(3.0)
 
+        # Când s-a ieșit din WHILE înseamnă că viețile sunt <= 0!
+        self.show_game_over()
+        time.sleep(10.0) 
+        
+        # Ne întoarcem la ecranul de alegere a jucătorilor!
+        self.root.after(0, self.return_to_setup)
+
     def input_listener(self):
-        """Ascultă UDP-ul de la Simulator sau Matrix Controller"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try: sock.bind(("0.0.0.0", PORT_RECV))
