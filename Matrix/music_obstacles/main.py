@@ -3,7 +3,6 @@ from song_search_engine import searchOnlineFiles
 from song_search_engine import play_song
 
 
-
 def listen_for_input():
     while True:
         line = sys.stdin.readline()
