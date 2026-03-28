@@ -12,14 +12,14 @@ class EyeAudioManager:
         self.audio_dir = "audio_eye"
         
         # Încărcăm sunetele (verificăm dacă fișierul există înainte să dăm crash)
-        self._load_sound("flip", "flip.wav")         # Când se apasă un buton
-        self._load_sound("match", "match.wav")       # Când se ghicește o pereche
-        self._load_sound("wrong", "wrong.wav")       # Când culorile sunt diferite
-        self._load_sound("warning", "warning.wav")   # Pâlpâirea de avertizare ochi
-        self._load_sound("eye_open", "eye_open.wav") # Când ochii sunt ACTIVI (RĂU!)
-        self._load_sound("damage", "damage.wav")     # Când ești prins mișcându-te
-        self._load_sound("win", "win.wav")           # Victorie
-        self._load_sound("game_over", "game_over.wav") # Înfrângere
+        self._load_sound("flip", "flip.mp3")           # Când se apasă un buton
+        self._load_sound("match", "match.mp3")         # Când se ghicește o pereche
+        self._load_sound("wrong", "faahh.mp3")         # Când culorile sunt diferite
+        self._load_sound("warning", "warning.mp3")     # Pâlpâirea de avertizare ochi
+        self._load_sound("eye_open", "eye_open.wav")   # Când ochii sunt ACTIVI (RĂU!)
+        self._load_sound("damage", "damage.wav")       # Când ești prins mișcându-te
+        self._load_sound("win", "win.mp3")             # Victorie
+        self._load_sound("game_over", "game_over.mp3") # Înfrângere
 
     def _load_sound(self, name, filename):
         path = os.path.join(self.audio_dir, filename)
