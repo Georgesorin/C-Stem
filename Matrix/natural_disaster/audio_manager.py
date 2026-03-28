@@ -15,7 +15,7 @@ class AudioManager:
         self._load_sound("countdown", "audio/clock.mp3")
         self._load_sound("meteor_boom", "audio/meteor.mp3")
         self._load_sound("fire_out", "audio/fire.mp3")
-        self._load_sound("damage", "audio/damage_hit.wav")
+        # self._load_sound("damage", "audio/damage_hit.wav")
         self._load_sound("game_over", "audio/game_over.mp3")
         
         # Pregătim muzica de fundal (BGM)
@@ -38,7 +38,7 @@ class AudioManager:
         if name in self.sounds:
             self.sounds[name].play()
 
-	    
+
     def stop(self, name):
         """Oprește forțat un singur efect sonor specific (ex: ceasul)"""
         if name in self.sounds:
