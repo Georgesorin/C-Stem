@@ -64,70 +64,49 @@ MAGENTA = (255, 0, 255)
 ORANGE = (255, 165, 0)
 
 class NetworkManager:
-    def __init__(self):
+    def __init__(self, game=None): # Adăugăm game=None pentru compatibilitate
+        self.game = game           # Salvăm referința către joc
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        self.sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
         self.running = True
         self.sequence_number = 0
-        self.bind_ip = "0.0.0.0"
         self.target_ip = CONFIG.get("device_ip", "255.255.255.255")
         self.send_port = CONFIG.get("send_port", 4626)
-        
-        # Priority: Auto-detecting 169.254 (for hardware)
+        self.recv_port = CONFIG.get("recv_port", 7800)
 
-    def _auto_bind(self):
-        # Auto-Bind Logic
+    def send_loop(self):
+        while self.running:
+            if self.game and hasattr(self.game, 'render'):
+                frame = self.game.render()
+                self.send_packet(frame)
+            time.sleep(0.04) # ~25 FPS
+
+    def recv_loop(self):
         try:
-            for iface, addrs in psutil.net_if_addrs().items():
-                for addr in addrs:
-                    if addr.family == socket.AF_INET and addr.address.startswith("169.254"):
-                        self.set_interface(addr.address)
-                        return
+            self.sock_recv.bind(("0.0.0.0", self.recv_port))
         except: pass
-
-    def set_interface(self, ip):
-        if self.bind_ip == ip: return
-        self.bind_ip = ip
-        print(f"Binding Network to {self.bind_ip}")
-        try:
-            self.sock_send.close()
-            self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            if self.bind_ip != "0.0.0.0":
-                self.sock_send.bind((self.bind_ip, 0))
-        except Exception as e:
-            print(f"Error binding port: {e}")
-
-    def discover(self, iface_ip, target_port, callback):
-        def _thread():
-            import time
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            sock.settimeout(0.5)
+        
+        while self.running:
             try:
-                sock.bind((iface_ip, 0))
-            except:
-                sock.close()
-                callback([])
-                return
-            
-            sock.sendto(b'y', ("255.255.255.255", target_port))
-            
-            devices = []
-            deadline = time.time() + 3
-            while time.time() < deadline:
-                try:
-                    data, addr = sock.recvfrom(1024)
-                    if data == b'y':
-                        if addr[0] not in [d['ip'] for d in devices]:
-                            devices.append({"ip": addr[0], "name": f"Matrix Device @ {addr[0]}"})
-                except socket.timeout:
-                    continue
-                except: break
-            sock.close()
-            callback(devices)
+                data, addr = self.sock_recv.recvfrom(2048)
+                if len(data) >= 1373 and data[0] == 0x88 and self.game:
+                    offset = 2 + (7 * 171) + 1 
+                    # MODIFICARE: Citim doar 64, așa cum ai vrut
+                    ch8_data = data[offset : offset + 64]
+                    for i, val in enumerate(ch8_data):
+                        # Actualizăm starea în joc (doar primii 64)
+                        if i < len(self.game.button_states):
+                            self.game.button_states[i] = (val == 0xCC)
+            except: pass
 
-        threading.Thread(target=_thread, daemon=True).start()
+    def start_bg(self):
+        # Această funcție pornește motoarele de rețea în fundal
+        threading.Thread(target=self.send_loop, daemon=True).start()
+        threading.Thread(target=self.recv_loop, daemon=True).start()
 
     def send_packet(self, frame_data):
         # Protocol v11 Implementation
