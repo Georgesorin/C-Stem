@@ -17,27 +17,40 @@ class NaturalDisaster:
         self.net.send_port = PORT_SEND
         
         self.running = True
-        self.active_splashes = [] 
-        self.meteors = []         
-        self.craters = [] # [x, y, viata_crater]
-        self.pending_hits = set() 
-        self.islands = [] 
+        self.active_splashes = [] # lista de animatii de splash cand este atins un obstacol
+        self.meteors = []         # lista de meteori care cad 
+        self.craters = []	  # [x, y, viata_crater]
+        self.pending_hits = set() # unde colectam toti pasii de la senzori
+        self.islands = [] 	  # lista de turnuri dupa harta
 
+	# dictionarul de cifre (fontul respectiv)
         self.digits = {
             '3': [(0,0), (1,0), (2,0), (2,1), (1,2), (2,2), (2,3), (2,4), (1,4), (0,4)],
             '2': [(0,0), (1,0), (2,0), (2,1), (0,2), (1,2), (2,2), (0,3), (0,4), (1,4), (2,4)],
             '1': [(1,0), (1,1), (1,2), (1,3), (1,4)]
         }
 
+	# colturile matricei de pixeli
         self.all_corners = [(0, 0), (WIDTH-1, 0), (0, HEIGHT-1), (WIDTH-1, HEIGHT-1)]
+
+	# pornim un thread pentru a separa listener ul de desenarea pe matrice
         threading.Thread(target=self.input_listener, daemon=True).start()
 
+    # functie de resetarea a matricei pentru runda urmatoare
     def reset_round_data(self):
-        self.active_corners = random.sample(self.all_corners, k=random.randint(1, 3))
+	# alegem un numar random de colturi din care va porni apa la modul de inundatie
+        self.active_corners = random.sample(self.all_corners, k=random.randint(1, 4))
+
+	#resetam insulele vechi
         self.islands = []
-        for _ in range(random.randint(3, 5)):
+	# generam un numar random de insule 
+        for _ in range(random.randint(3, 4)):
+	    # alegem random niste coordonate si desenam un patrat 3x3 pe ecran
             ix, iy = random.randint(1, WIDTH-4), random.randint(1, HEIGHT-4)
+	    # le adaugam la lista de insule
             self.islands.append((ix, iy, 3, 3))
+
+	# golim lista de meteoriti, cratere, splashes, si de pasi
         self.meteors = []
         self.craters = [] 
         self.active_splashes = []
