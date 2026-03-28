@@ -44,14 +44,16 @@ class Player:
         #    self.last_move_time = current_time
 
 class Ball:
-    def __init__(self):
+    def __init__(self, base_speed=0.5, acceleration=1.05):
+        self.base_speed = base_speed
+        self.acceleration = acceleration
         self.reset()
 
     def reset(self):
         self.x = 8.0   # Mijloc orizontal
         self.y = 16.0  # Mijloc vertical
-        self.vx = 0.5  # Viteza pe X
-        self.vy = 0.5  # Viteza pe Y
+        self.vx = self.base_speed
+        self.vy = self.base_speed
 
     def update(self, p1, p2):
         self.x += self.vx
@@ -99,14 +101,121 @@ class Ball:
         return None
     
 class PongGame:
-    def __init__(self):
+    def __init__(self, level="Normal", p1_rgb=(255,0,0), p2_rgb=(0,0,255), total_rounds=3):
+        configs = {
+            "Easy":   {"speed": 0.3, "accel": 1.02},
+            "Normal": {"speed": 0.5, "accel": 1.05},
+            "Hard":   {"speed": 0.8, "accel": 1.10}
+        }
+        cfg = configs.get(level, configs["Normal"])
+        self.total_rounds = total_rounds
         self.button_states = [False] * 512
         self.p1 = Player(1, RED)
         self.p2 = Player(2, BLUE)
-        self.ball = Ball()
+        self.ball = Ball(base_speed=cfg["speed"], acceleration=cfg["accel"])
         self.running = True
         self.buffer = bytearray(16 * 32 * 3) # Buffer gol
         self.lock = threading.Lock()
+        self.running = True
+        self.buffer = bytearray(16 * 32 * 3) # Buffer gol
+        self.lock = threading.Lock()
+        self.current_round = 1
+        # Scoruri pe runde (câte runde a câștigat fiecare)
+        self.rounds_won_p1 = 0
+        self.rounds_won_p2 = 0
+        
+        
+        # --- ADAUGĂ ASTA ---
+        self.state = "COUNTDOWN" 
+        self.current_digit = 3
+        self.goal_loser = 0
+
+    def reset_for_new_round(self):
+        """Resetează doar scorul de puncte și mingea, păstrând rundele."""
+        self.p1.score = 0
+        self.p2.score = 0
+        self.ball.reset()
+        self.state = "COUNTDOWN"
+
+    def draw_digit(self, digit, color):
+        """Desenează cifrele 3, 2, 1 pe centrul matricei."""
+        digits = {
+            '3': [(0,0), (1,0), (2,0), (2,1), (0,2), (1,2), (2,2), (2,3), (0,4), (1,4), (2,4)],
+            '2': [(0,0), (1,0), (2,0), (2,1), (0,2), (1,2), (2,2), (0,3), (0,4), (1,4), (2,4)],
+            '1': [(1,0), (1,1), (1,2), (1,3), (1,4)]
+        }
+        
+        digit_str = str(digit)
+        if digit_str in digits:
+            points = digits[digit_str]
+            # x_offset=6, y_offset=13 pentru a centra pe ecranul de 16x32
+            for dx, dy in points:
+                self.set_led(self.buffer, 6 + dx, 13 + dy, color)
+
+    def draw_stop(self, color):
+        """Desenează cuvântul STOP centrat pe matrice."""
+        letters = {
+            'S': [(0,0),(1,0),(2,0),(0,1),(0,2),(1,2),(2,2),(2,3),(0,4),(1,4),(2,4)],
+            'T': [(0,0),(1,0),(2,0),(1,1),(1,2),(1,3),(1,4)],
+            'O': [(0,0),(1,0),(2,0),(0,1),(2,1),(0,2),(2,2),(0,3),(2,3),(0,4),(1,4),(2,4)],
+            'P': [(0,0),(1,0),(2,0),(0,1),(2,1),(0,2),(1,2),(2,2),(0,3),(0,4)]
+        }
+        
+        # Coordonatele de start (X) pentru fiecare literă
+        word = [('S', 0), ('T', 4), ('O', 8), ('P', 12)] 
+
+        self.buffer = bytearray(16 * 32 * 3) # Curățăm ecranul (negru)
+        
+        for char, x_offset in word:
+            for dx, dy in letters[char]:
+                # Centrat pe Y (rândul 13)
+                self.set_led(self.buffer, x_offset + dx, 13 + dy, color)
+
+    def draw_explosion_animation(self):
+        """O explozie masivă pe toată matricea la final de joc."""
+        import random
+        self.buffer = bytearray(16 * 32 * 3)
+        colors = [(255, 255, 255), (255, 215, 0), (255, 69, 0), (0, 255, 255)] # Culori festive
+        for _ in range(40): # 40 de scântei pe cadru
+            rx = random.randint(0, 15)
+            ry = random.randint(0, 31)
+            rc = random.choice(colors)
+            self.set_led(self.buffer, rx, ry, rc)
+
+    def draw_win_lose(self, winner_id):
+        """Desenează WIN pe jumătatea câștigătorului și LOSE pe cealaltă."""
+        self.buffer = bytearray(16 * 32 * 3)
+        
+        letters = {
+            'W': [(0,0),(0,1),(0,2),(0,3),(1,4),(2,3),(3,4),(4,0),(4,1),(4,2),(4,3)],
+            'I': [(0,0),(0,1),(0,2),(0,3),(0,4)],
+            'N': [(0,0),(0,1),(0,2),(0,3),(0,4),(1,1),(2,2),(3,0),(3,1),(3,2),(3,3),(3,4)],
+            'L': [(0,0),(0,1),(0,2),(0,3),(0,4),(1,4),(2,4)],
+            'O': [(0,0),(1,0),(2,0),(0,1),(2,1),(0,2),(2,2),(0,3),(2,3),(0,4),(1,4),(2,4)],
+            'S': [(0,0),(1,0),(2,0),(0,1),(0,2),(1,2),(2,2),(2,3),(0,4),(1,4),(2,4)],
+            'E': [(0,0),(1,0),(2,0),(0,1),(0,2),(1,2),(0,3),(0,4),(1,4),(2,4)]
+        }
+        
+        # P1 e sus (rândurile 0-15), P2 e jos (rândurile 16-31)
+        y_p1, y_p2 = 5, 21 
+        
+        if winner_id == 1:
+            win_y, lose_y = y_p1, y_p2
+            win_color, lose_color = (0, 255, 0), (255, 0, 0) # WIN Verde, LOSE Roșu
+        else:
+            lose_y, win_y = y_p1, y_p2
+            lose_color, win_color = (255, 0, 0), (0, 255, 0)
+
+        # Desenăm WIN (x_offsets: W=2, I=8, N=10)
+        for dx, dy in letters['W']: self.set_led(self.buffer, 2 + dx, win_y + dy, win_color)
+        for dx, dy in letters['I']: self.set_led(self.buffer, 8 + dx, win_y + dy, win_color)
+        for dx, dy in letters['N']: self.set_led(self.buffer, 10 + dx, win_y + dy, win_color)
+
+        # Desenăm LOSE (x_offsets: L=1, O=5, S=9, E=13)
+        for dx, dy in letters['L']: self.set_led(self.buffer, 1 + dx, lose_y + dy, lose_color)
+        for dx, dy in letters['O']: self.set_led(self.buffer, 5 + dx, lose_y + dy, lose_color)
+        for dx, dy in letters['S']: self.set_led(self.buffer, 9 + dx, lose_y + dy, lose_color)
+        for dx, dy in letters['E']: self.set_led(self.buffer, 13 + dx, lose_y + dy, lose_color)
         
     def get_real_coords(self, index):
         # Determinăm "fâșia" (0, 1, 2 sau 3) din pachetul de 64
@@ -140,7 +249,9 @@ class PongGame:
 
     def tick(self):
         with self.lock:
-            self.ball.update(self.p1, self.p2)
+            # 1. CAPTURĂM statusul mingii (ex: "GOAL_P1", "GOAL_P2" sau None)
+            status = self.ball.update(self.p1, self.p2)
+            
             found_p1 = False
             found_p2 = False
 
@@ -154,6 +265,32 @@ class PongGame:
                         self.p2.move_to(x)
                         found_p2 = True
                 if found_p1 and found_p2: break
+            
+            if self.p1.score >= 11:
+                self.rounds_won_p1 += 1
+                return self.check_match_winner()
+            
+            if self.p2.score >= 11:
+                self.rounds_won_p2 += 1
+                return self.check_match_winner()
+
+            return status
+        
+    def check_match_winner(self):
+        """Decide dacă meciul s-a terminat sau doar runda."""
+        # Calculăm de câte runde e nevoie pentru a câștiga (ex: 2 din 3)
+        needed_to_win = (self.total_rounds // 2) + 1
+        
+        if self.rounds_won_p1 >= needed_to_win:
+            return "WINNER_P1"
+        if self.rounds_won_p2 >= needed_to_win:
+            return "WINNER_P2"
+        
+        self.p1.score = 0
+        self.p2.score = 0
+        self.ball.reset()
+        self.state = "COUNTDOWN"
+        return f"ROUND_OVER_{self.current_round}"
 
     def set_led(self, buffer, target_x, target_y, color):
         # Aceasta este funcția de ZIG-ZAG pe care ai trimis-o tu
@@ -188,29 +325,56 @@ class PongGame:
         return x, y
 
     def render(self):
-        self.buffer = bytearray(16 * 32 * 3)
+        self.buffer = bytearray(16 * 32 * 3) # Curățăm mereu la începutul cadrului
         
-        # 1. Borduri Verzi (Laterale)
-        for y in range(32):
-            self.set_led(self.buffer, 0, y, GREEN)
-            self.set_led(self.buffer, 15, y, GREEN)
+        # --- DACA SUNTEM IN NUMARATOARE ---
+        if self.state == "COUNTDOWN":
+            colors = {3: (255,0,0), 2: (255,255,0), 1: (0,255,0)}
+            c_color = colors.get(self.current_digit, (255,255,255))
+            self.draw_digit(self.current_digit, c_color)
+            return self.buffer
 
-        # 2. Porti Rosii (Sus/Jos)
-        for x in range(1, 15):
-            self.set_led(self.buffer, x, 0, RED)
-            self.set_led(self.buffer, x, 31, RED)
+        # --- DACA SUNTEM LA FINAL DE JOC ---
+        if self.state == "GAME_OVER_EXPLOSION":
+            self.draw_explosion_animation()
+            return self.buffer
 
-        # 3. Linie mijloc
-        for x in range(1, 15):
-            self.set_led(self.buffer, x, 15, (20, 20, 20))
+        elif self.state == "GAME_OVER_TEXT":
+            # self.winner va fi setat din main.py
+            self.draw_win_lose(getattr(self, 'winner', 1))
+            return self.buffer
 
-        # 4. Palete (ORANGE conform imaginii tale)
-        for i in range(self.p1.width):
-            self.set_led(self.buffer, int(self.p1.x + i), self.p1.y, self.p1.color)
-        for i in range(self.p2.width):
-            self.set_led(self.buffer, int(self.p2.x + i), self.p2.y, self.p2.color)
+        # --- DACA SUNTEM IN PAUZA ---
+        elif self.state == "PAUSED":
+            # Desenăm STOP cu culoarea Portocalie
+            self.draw_stop((255, 165, 0))
+            return self.buffer
 
-        # 5. Minge
-        self.set_led(self.buffer, int(self.ball.x), int(self.ball.y), WHITE)
+        # --- DACA JUCAM (PLAYING) ---
+        elif self.state == "PLAYING":
+            # 1. Borduri Verzi (Laterale)
+            for y in range(32):
+                self.set_led(self.buffer, 0, y, (0, 255, 0))
+                self.set_led(self.buffer, 15, y, (0, 255, 0))
 
+            # 2. Porti Rosii (Sus/Jos)
+            for x in range(1, 15):
+                self.set_led(self.buffer, x, 0, (255, 0, 0))
+                self.set_led(self.buffer, x, 31, (255, 0, 0))
+
+            # 3. Linie mijloc
+            for x in range(1, 15):
+                self.set_led(self.buffer, x, 15, (20, 20, 20))
+
+            # 4. Palete
+            for i in range(self.p1.width):
+                self.set_led(self.buffer, int(self.p1.x + i), self.p1.y, self.p1.color)
+            for i in range(self.p2.width):
+                self.set_led(self.buffer, int(self.p2.x + i), self.p2.y, self.p2.color)
+
+            # 5. Minge
+            self.set_led(self.buffer, int(self.ball.x), int(self.ball.y), (255, 255, 255))
+
+            return self.buffer
+        
         return self.buffer
