@@ -1,0 +1,5 @@
+.env
+.DS_Store          # Specific macOS
+__pycache__/
+config.local.json
+.vscode/
