@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 from difflib import SequenceMatcher
+import state
 
 try:
     # try normal import
@@ -74,3 +75,23 @@ def searchOnlineFiles(query, limit=10):
         results.append({'title': f"EROARE CRITICA: {str(e)}", 'artist': 'System', 'url': '', 'duration': '0:00'})
         
     return results
+
+def play_song(URL) :
+    global current_player
+
+    if state.current_player is not None:
+        try: 
+            state.current_player.terminate()
+            state.current_player.wait(timeout = 1)
+        except:
+            state.current_player.kill()
+
+    try:
+        cmd = ["mpv", "--no-video", "--ytdl-format=bestaudio", URL]
+        print("SLAYYYYYYYYYYY")
+        state.current_player = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"Error could not play song: {e}")
+
+    
+        
