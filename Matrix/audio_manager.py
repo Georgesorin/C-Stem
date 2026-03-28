@@ -38,6 +38,16 @@ class AudioManager:
         if name in self.sounds:
             self.sounds[name].play()
 
+	    
+    def stop(self, name):
+        """Oprește forțat un singur efect sonor specific (ex: ceasul)"""
+        if name in self.sounds:
+            self.sounds[name].stop()
+
+    def stop_all_sfx(self):
+        """Târâie "siguranța" la toate sunetele (perfect pentru Game Over)"""
+        pygame.mixer.stop()
+
     def play_bgm(self):
         """Pornește muzica de fundal în buclă infinită (-1)"""
         if os.path.exists(self.bgm_path):

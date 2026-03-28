@@ -238,11 +238,14 @@ class NaturalDisasterGame:
             
             self.ui.update_dashboard("PREGĂTIRE...", "Stai pe poziții!", "white")
             for count in ['3', '2', '1']:
+                self.audio.stop("countdown")
                 self.audio.play("countdown")
                 for _ in range(25):
                     frame = bytearray(1536); self.draw_base(frame)
                     for px, py in DIGITS[count]: self.hw.set_pixel_physical(frame, 7+px, 14+py, COLORS["WHITE"])
                     self.hw.send_frame(frame); time.sleep(0.04)
+
+            self.audio.stop("countdown") # 3. Închidem ceasul când pornește runda!
 
             game_mode = self.game_sequence[self.current_game_index]
             self.current_game_index = (self.current_game_index + 1) % len(self.game_sequence)
@@ -260,6 +263,7 @@ class NaturalDisasterGame:
 
         # GAME OVER SEQUENCE
         self.audio.stop_bgm()
+        self.audio.stop_all_sfx()
         self.audio.play("game_over")
         self.ui.show_game_over(self.score)
         
