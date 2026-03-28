@@ -16,14 +16,14 @@ class GuessingGameEye:
         
         self.running = True
         self.score = 0
-        self.hp = 3
+        self.hp = 3 
         
         self.total_buttons = 40
         self.button_map = {}
         self._generate_hidden_colors()
         
-        self.currently_flipped_indices = []
-        self.flip_back_time = 0          
+        self.currently_flipped_indices = [] 
+        self.flip_back_time = 0             
 
         self.eye_phase = "sleeping" 
         self.eye_phase_timer = time.time() + random.uniform(*EYE_COOLDOWN_RANGE)
@@ -110,12 +110,16 @@ class GuessingGameEye:
         if color1 == color2:
             self.button_map[idx1]["state"] = "matched"
             self.button_map[idx2]["state"] = "matched"
-            self.score += 1
+            
+            # ADAUGĂM 5 PUNCTE PENTRU FIECARE PERECHE GHICITĂ
+            self.score += 5
+            self.ui.update_stats(self.score, self.hp)
             
             self.audio.play("match") 
             self.currently_flipped_indices.clear()
             
-            if self.score == 20:
+            # 20 de perechi x 5 puncte = 100 de puncte pentru victorie
+            if self.score >= 100:
                 self._handle_win()
         else:
             self.audio.play("wrong") 
@@ -150,12 +154,14 @@ class GuessingGameEye:
 
     def _handle_motion_penalty(self):
         self.hp -= 1
-        self.ui.update_lives(self.hp) # <--- Aici facem update la vieți când ești prins!
+        self.ui.update_stats(self.score, self.hp) # <--- Trimitem scorul și noul HP
         
         self.audio.play("damage") 
         
         self.eye_phase = "sleeping" 
         self.eye_phase_timer = time.time() + random.uniform(*EYE_COOLDOWN_RANGE) + 3.0 
+
+        self.ui.update_eye_status(self.eye_phase)
 
         if self.hp <= 0:
             self._handle_lose()
@@ -163,6 +169,9 @@ class GuessingGameEye:
     def _handle_win(self):
         self.running = False
         self.eye_phase = "off"
+
+        self.ui.update_eye_status(self.eye_phase)
+
         self.audio.play("win")
         
         for w in range(1, NUM_WALLS + 1):
@@ -173,6 +182,9 @@ class GuessingGameEye:
     def _handle_lose(self):
         self.running = False
         self.eye_phase = "off"
+
+        self.ui.update_eye_status(self.eye_phase)
+
         self.audio.play("game_over")
         
         for w in range(1, NUM_WALLS + 1):
@@ -182,8 +194,8 @@ class GuessingGameEye:
 
     # --- MAIN LOOP ---
     def game_loop(self):
-        # Actualizăm interfața la start cu HP inițial (3)
-        self.ui.update_lives(self.hp)
+        # Actualizăm interfața la start cu HP inițial (3) și Scor (0)
+        self.ui.update_stats(self.score, self.hp)
         
         while self.running:
             start_tick = time.time()

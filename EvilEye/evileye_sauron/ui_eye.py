@@ -12,9 +12,15 @@ class EyeDashboardUI:
         # 1. Titlu Principal Gigant
         tk.Label(self.root, text=title_text, font=("Consolas", 65, "bold"), fg="white", bg="black").pack(pady=(40, 10))
         
-        # 2. Afișarea Vieților (Adăugat la cerere)
-        self.lbl_lives = tk.Label(self.root, text="❤️❤️❤️", font=("Consolas", 50), fg="red", bg="black")
-        self.lbl_lives.pack(pady=(0, 20))
+        # 2. Container pentru SCOR și VIEȚI (aliniate pe centru)
+        stats_frame = tk.Frame(self.root, bg="black")
+        stats_frame.pack(pady=(0, 20))
+        
+        self.lbl_score = tk.Label(stats_frame, text="SCOR: 0", font=("Consolas", 50, "bold"), fg="#00FF00", bg="black")
+        self.lbl_score.pack(side="left", padx=40)
+        
+        self.lbl_lives = tk.Label(stats_frame, text="❤️❤️❤️", font=("Consolas", 50), fg="red", bg="black")
+        self.lbl_lives.pack(side="left", padx=40)
 
         # 3. PĂTRATUL URIAȘ DE CULOARE
         self.pnl_first_click_color = tk.Frame(self.root, bg="black", width=500, height=500, relief="solid", bd=8)
@@ -23,13 +29,14 @@ class EyeDashboardUI:
         
         self._pulse_active = False 
 
-    def update_lives(self, lives):
-        """Actualizează HP-ul pe ecran"""
+    def update_stats(self, score, lives):
+        """Actualizează Scorul și HP-ul pe ecran"""
         lives_text = "❤️" * lives if lives > 0 else "💀"
+        self.root.after(0, lambda: self.lbl_score.config(text=f"SCOR: {score}"))
         self.root.after(0, lambda: self.lbl_lives.config(text=lives_text))
 
     def update_eye_status(self, phase):
-        """Gestionează doar pâlpâirea vizuală pe ecran, fără text suplimentar"""
+        """Gestionează doar pâlpâirea vizuală pe ecran"""
         if phase == "active":
             self.start_eye_pulse()
         else:

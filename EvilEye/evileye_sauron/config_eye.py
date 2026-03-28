@@ -32,7 +32,7 @@ PAIR_COLORS = [
 
 # Configurație Timers
 # Cât stau butoanele "întoarse" dacă nu s-au potrivit (secunde)
-FLIP_BACK_TIME = 2.0 
+FLIP_BACK_TIME = 0.5
 
 # Cât timp Ochiul stă DESCHIS (trebuie să stai nemișcat)
 EYE_ACTIVE_DURATION = 4.0 
