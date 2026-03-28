@@ -11,12 +11,12 @@ class AudioManager:
         self.sounds = {}
         
         # Încărcăm sunetele (dacă fișierul nu există, trece peste fără a da crash)
-        self._load_sound("splash", "audio/lava.mp3")
-        self._load_sound("countdown", "audio/clock.mp3")
-        self._load_sound("meteor_boom", "audio/meteor.mp3")
-        self._load_sound("fire_out", "audio/fire.mp3")
+        self._load_sound("splash", "audio_natural/lava.mp3")
+        self._load_sound("countdown", "audio_natural/clock.mp3")
+        self._load_sound("meteor_boom", "audio_natural/meteor.mp3")
+        self._load_sound("fire_out", "audio_natural/fire.mp3")
         # self._load_sound("damage", "audio/damage_hit.wav")
-        self._load_sound("game_over", "audio/game_over.mp3")
+        self._load_sound("game_over", "audio_natural/game_over.mp3")
         
         # Pregătim muzica de fundal (BGM)
         self.bgm_path = "audio/intense_background.wav"

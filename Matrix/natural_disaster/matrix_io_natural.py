@@ -1,8 +1,8 @@
 # matrix_io.py
 import socket
 import threading
-from Controller import NetworkManager
-from config import *
+from Controller_natural import NetworkManager
+from config_natural import *
 
 class MatrixHardware:
     def __init__(self):

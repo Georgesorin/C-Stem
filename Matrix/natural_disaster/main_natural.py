@@ -3,10 +3,10 @@ import time
 import math
 import random
 import threading
-from config import *
-from matrix_io import MatrixHardware
-from ui import DashboardUI
-from audio_manager import AudioManager
+from config_natural import *
+from matrix_io_natural import MatrixHardware
+from ui_natural import DashboardUI
+from audio_manager_natural import AudioManager
 
 class NaturalDisasterGame:
     def __init__(self):
