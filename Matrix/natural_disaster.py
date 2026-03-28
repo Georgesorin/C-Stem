@@ -216,33 +216,48 @@ class NaturalDisasterGame:
         return True
 
     def play_meteors(self):
-        self.update_dashboard("METEORIȚI!", "Evită exploziile!", "red")
+        self.update_dashboard("METEORIȚI!", "Evită zonele ROȘII!", "red")
         
         for f in range(350):
             if self.lives <= 0: break 
             frame = bytearray(1536); self.draw_base(frame)
             
+            # Desenăm craterele vechi
             for c in self.craters[:]:
                 for dx in [-1, 0, 1]:
                     for dy in [-1, 0, 1]: self.set_pixel_physical(frame, c['x']+dx, c['y']+dy, COLORS["CRATER"])
                 c['life'] -= 1
                 if c['life'] <= 0: self.craters.remove(c)
                 
-            if f % 15 == 0: self.meteors.append({'x': random.randint(1, WIDTH-2), 'y': random.randint(1, HEIGHT-2), 'timer': 35})
+            # Generăm meteoriți (Timer mărit la 50 pentru a oferi mai mult timp de fugă)
+            if f % 15 == 0: 
+                self.meteors.append({'x': random.randint(1, WIDTH-2), 'y': random.randint(1, HEIGHT-2), 'timer': 50})
                 
             for m in self.meteors[:]:
                 mx, my, timer = m['x'], m['y'], m['timer']
-                if timer > 8: 
-                    if f % 4 == 0: self.set_pixel_physical(frame, mx, my, COLORS["METEOR_WARN"])
+                
+                # FAZA 1: AVERTIZAREA (Acum arată toată zona de 3x3)
+                if timer > 10: 
+                    if f % 4 == 0 or f % 4 == 1: # Pâlpâie mai vizibil
+                        for dx in [-1, 0, 1]:
+                            for dy in [-1, 0, 1]:
+                                if dx == 0 and dy == 0:
+                                    self.set_pixel_physical(frame, mx, my, COLORS["METEOR_WARN"]) # Centru aprins
+                                else:
+                                    self.set_pixel_physical(frame, mx+dx, my+dy, (80, 0, 0)) # Margini roșu închis
+                
+                # FAZA 2: EXPLOZIA PORTOCALIE (Aici se scade viața)
                 elif timer > 0:
                     for dx in [-1, 0, 1]:
                         for dy in [-1, 0, 1]: self.set_pixel_physical(frame, mx+dx, my+dy, COLORS["METEOR_IMPACT"])
+                    
                     if timer == 1: self.craters.append({'x': mx, 'y': my, 'life': 100})
                     
+                    # Coliziune: Verificăm dacă cineva e în zona exploziei EXACT acum
                     for px, py in self.pressed_buttons:
                         if (px, py) in self.splashing_positions: continue
                         if abs(px - mx) <= 1 and abs(py - my) <= 1:
-                            self.register_hit(px, py)
+                            self.register_hit(px, py) # Scade o viață și face splash-ul
                             
                 m['timer'] -= 1
                 if m['timer'] <= -4: self.meteors.remove(m)
