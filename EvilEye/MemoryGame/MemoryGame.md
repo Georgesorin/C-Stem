@@ -1,45 +1,52 @@
-***MEMORY GAME***
-***for Evil Eye Room***
+🕹️ Game 1: MEMORY MEMORY
+Location: Evil Eye Room
 
+📋 Introduction
+Neon Memory is a sequential memory game designed specifically for the Evil Eye room hardware. Players must cooperate or compete to memorize lighting patterns that become increasingly complex. The game tests reaction speed and memory capacity under extreme pressure.
 
-**PE RUNDE**
-Se va aprinde un ochi de pe peretele la care urmeaza sa inceapa jocul
-Se aprinde primul patrat cu o culoare
-Jucatorul apasa patratul respectiv
-Sound effect de reusita/
+⚙️ Gameplay Mechanics
+The game proceeds in sequential rounds using the wall buttons and the central Eye element.
 
-Se aprinde primul patrat si dupa inca unul de pe acelasi perete
-Jucatorul trebuie sa le apese pe amandoua pe rand
-Sound effect de reusita/
+⚡ Wall Activation: A wall is randomly selected, and the Eye element on that wall lights up, indicating the active play zone.
 
-Tot asa pana cand o sa fie mai multe patrate de apasat
+💡 Sequence Display: The first button (square) flashes in a specific color. The player must memorize and press that button.
 
-Exista un timer in care jucatorul trebuie sa apese patratele in ordinea corecta pentru fiecare runda
+🚀 Progression: If the press is correct, a success sound effect is played. Each subsequent round adds a new button to the sequence:
 
-Daca jucatorul da fail trebuie sa o ia de la capat de la prima runda
+Round 1: Button A
 
-**PE NIVELE**
+Round 2: Buttons A + B
 
-**Nivelul 1:***
+Round 3: Buttons A + B + C
 
-Pentru primul nivel, in functie de numarul de jucatori se vor aprinde luminile de pe un anumit numar de pereti in functie de numarul de jucatori:
+⏱️ Timer: The player has a strict time limit to reproduce the entire sequence for each round.
 
-2 jucatori: 1 perete
-3 jucatori: 1 perete
-4 jucatori: 2 pereti
-5 jucatori: 2 pereti
-6 jucatori: 3 pereti
-7 jucatori: 3 pereti
-8 jucatori: 4 pereti
-9 jucatori: 4 pereti
-10 jucatori: 4 pereti
+❌ Fail State: If the player presses the wrong button or time expires, the game resets to the first round.
 
-Se aprind luminile
+📈 Levels and Scaling
+The difficulty scales dynamically based on the number of operators (players) present:
 
-***Urmatoarele nivele:***
-Se adauga un perete in plus (daca mai sunt pereti disponibili) 
-Cand se atinge numarul de pereti disponibili
+Level 1: The number of active walls depends on the player count:
+👥 2-3 players: 1 active wall
 
-*Number of players necesary:*
-Minimum: 2 players
-Maximum: 10 players
+👥 4-5 players: 2 active walls
+
+👥 6-7 players: 3 active walls
+
+👥 8-10 players: 4 active walls
+
+Subsequent Levels:
+As players advance, additional walls are added (up to a maximum of 4) to increase the spatial complexity of the memory task.
+
+🛠️ Configuration & UI
+👥 Capacity: 2 - 10 people.
+
+🔥 Difficulty: Adjustable speed for light sequences (ms).
+
+🖥️ Interface: The secondary monitor displays:
+
+Current round number (Current Round)
+
+The high score (High Score)
+
+Remaining time (Time Left)
