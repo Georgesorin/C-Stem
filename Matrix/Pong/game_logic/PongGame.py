@@ -144,9 +144,9 @@ class PongGame:
             oy = random.randint(10, 20)
             self.obstacles.append(Obstacle(ox, oy))
         configs = {
-            "Easy":   {"speed": 0.3, "accel": 1.02},
-            "Normal": {"speed": 0.5, "accel": 1.05},
-            "Hard":   {"speed": 0.8, "accel": 1.10}
+            "Easy":   {"speed": 0.2, "accel": 1.01},
+            "Normal": {"speed": 0.3, "accel": 1.02},
+            "Hard":   {"speed": 0.5, "accel": 1.3}
         }
         cfg = configs.get(level, configs["Normal"])
         self.total_rounds = total_rounds

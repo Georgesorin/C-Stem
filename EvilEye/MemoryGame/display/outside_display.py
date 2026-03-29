@@ -80,6 +80,7 @@ class ControlPanel:
                                    bg=self.C_BG, fg=self.C_ACCENT)
         self.lbl_status.pack(side="bottom", pady=40)
 
+
     def _internal_start(self):
         self.config_frame.pack_forget()
         self.controls_frame.pack(fill="both", expand=True)

@@ -9,6 +9,15 @@ from Controller import NetworkManager
 from Simulator import *
 import pygame
 
+HAS_AUDIO = False
+try:
+    pygame.mixer.pre_init(44100, -16, 2, 512)
+    pygame.mixer.init()
+    HAS_AUDIO = True
+    print("🔊 Sistem audio inițializat cu succes.")
+except Exception as e:
+    print(f"⚠️ Atenție: Mixerul audio nu a putut fi pornit ({e}). Jocul va rula fără sunet.")
+
 class MasterLauncher:
     def __init__(self, root):
         pygame.mixer.init()
@@ -31,7 +40,26 @@ class MasterLauncher:
         self.ui = OutsideDisplay(self.root, self.on_start, self.on_stop, self.toggle_pause)
         
         self.root.protocol("WM_DELETE_WINDOW", self.cleanup)
-        self.snd_fail = pygame.mixer.Sound("game_logic/sfx/fail.wav")
+        self.is_paused = False
+        self.update_job = None
+
+        # --- ÎNCĂRCARE SUNET CU VERIFICARE ---
+        self.snd_fail = None
+        if HAS_AUDIO:
+            sound_path = os.path.join("game_logic", "sfx", "fail.wav")
+            if os.path.exists(sound_path):
+                self.snd_fail = pygame.mixer.Sound(sound_path)
+            else:
+                print(f"❌ Fișierul de sunet nu a fost găsit la: {sound_path}")
+
+        from Controller import CONFIG as NET_CONFIG
+        print("\n" + "="*30)
+        print(f"🚀 PORNIRE JOC: {datetime.now().strftime('%H:%M:%S')}")
+        print(f"📡 DESTINAȚIE IP: {NET_CONFIG.get('device_ip')}")
+        print(f"📤 PORT TRIMITERE (Imagine): {NET_CONFIG.get('send_port')}")
+        print(f"📥 PORT RECEPȚIE (Butoane): {NET_CONFIG.get('recv_port')}")
+        print("="*30 + "\n")
+        # ------------------------
 
     def on_start(self):
         """Pornirea meciului și crearea ferestrelor."""
