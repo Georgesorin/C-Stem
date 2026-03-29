@@ -10,6 +10,7 @@ import math
 import colorsys
 import os
 import json
+import pygame
 from matrix_font import FONT_5x7
 from small_font import FONT_3x5
 
@@ -905,7 +906,7 @@ class MatrixGUI(GameDesignMixin):
             self.next_spawn_in = 50
 
         while self.is_sending:
-            music_active = state.current_player is not None and state.current_player.poll() is None
+            music_active = pygame.mixer.music.get_busy()
             
             if music_active and not getattr(self, 'is_counting_down', False):
                 self.next_spawn_in -= 1
