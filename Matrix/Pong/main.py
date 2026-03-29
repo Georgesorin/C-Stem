@@ -7,9 +7,11 @@ from display.inside_display import InsideDisplay
 from game_logic.PongGame import PongGame
 from Controller import NetworkManager 
 from Simulator import *
+import pygame
 
 class MasterLauncher:
     def __init__(self, root):
+        pygame.mixer.init()
         self.root = root
         self.root.title("Pong LED Matrix - Master Controller")
         self.root.geometry("500x750")
@@ -29,6 +31,7 @@ class MasterLauncher:
         self.ui = OutsideDisplay(self.root, self.on_start, self.on_stop, self.toggle_pause)
         
         self.root.protocol("WM_DELETE_WINDOW", self.cleanup)
+        self.snd_fail = pygame.mixer.Sound("game_logic/sfx/fail.wav")
 
     def on_start(self):
         """Pornirea meciului și crearea ferestrelor."""
@@ -113,6 +116,9 @@ class MasterLauncher:
                 if status.startswith("WINNER"):
                     self.trigger_winner_sequence(status)
                     return
+                elif status and status.startswith("GOAL"):
+                    # Redă un sunet de frecvență joasă (400Hz) timp de 500ms
+                    self.snd_fail.play()
                 elif status.startswith("ROUND_OVER"):
                     # Apelăm handler-ul de final de rundă creat anterior
                     self.handle_round_end(status)

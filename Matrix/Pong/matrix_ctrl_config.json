@@ -1,5 +1,5 @@
 {
-    "device_ip": "255.252.255.255",
+    "device_ip": "255.255.255.255",
     "send_port": 4626,
     "recv_port": 7800,
     "last_used_ports": [],
