@@ -149,11 +149,15 @@ class MasterLauncher:
                     self.trigger_winner_sequence(status)
                     return
                 elif status and status.startswith("GOAL"):
+<<<<<<< Updated upstream
                     # ÎNLOCUIEȘTE: if self.snd_fail: self.snd_fail.play()
                     # CU:
                     self.play_sound("fail") 
                     
                     self.game_engine.state = "COUNTDOWN"
+=======
+                    self.is_paused = True # Oprim loop-ul temporar
+>>>>>>> Stashed changes
                     self.root.after(1000, lambda: self.run_countdown(3))
                 elif status.startswith("ROUND_OVER"):
                     self.handle_round_end(status)

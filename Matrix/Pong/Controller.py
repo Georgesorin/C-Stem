@@ -109,9 +109,9 @@ class NetworkManager:
             except: pass
 
     def start_bg(self):
-        # Această funcție pornește motoarele de rețea în fundal
-        threading.Thread(target=self.send_loop, daemon=True).start()
-        threading.Thread(target=self.recv_loop, daemon=True).start()
+        self.running = True
+        threading.Thread(target=self.recv_loop, daemon=True).start() # Ascultă butoanele
+        threading.Thread(target=self.send_loop, daemon=True).start() # Trimite imaginea
 
     def send_packet(self, frame_data):
         # Protocol v11 Implementation
