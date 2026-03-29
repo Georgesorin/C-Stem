@@ -184,8 +184,9 @@ class EvilEyeHardware:
             for (ch, led), (r, g, b) in self._led_states.items():
                 ch_idx = ch - 1
                 if 0 <= ch_idx < 4 and 0 <= led < 11:
-                    frame[led * 12 + ch_idx] = g
-                    frame[led * 12 + 4 + ch_idx] = r
+                    # CUM TREBUIE SĂ FIE PENTRU HARDWARE-UL VOSTRU:
+                    frame[led * 12 + ch_idx] = r
+                    frame[led * 12 + 4 + ch_idx] = g
                     frame[led * 12 + 8 + ch_idx] = b
 
             # Folosim active_send_port!
