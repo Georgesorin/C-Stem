@@ -33,6 +33,19 @@ class OutsideDisplay:
         
         self.setup_ui()
 
+    def get_selected_setup(self):
+        """Colectează toate opțiunile alese în interfață și le trimite către joc."""
+        # Luăm tuplul RGB (primele 3 valori) din dicționarul COLORS
+        p1_rgb = COLORS[self.p1_color_name][0:3]
+        p2_rgb = COLORS[self.p2_color_name][0:3]
+        
+        return {
+            "p1_color": p1_rgb,
+            "p2_color": p2_rgb,
+            "difficulty": self.difficulty,
+            "rounds": self.rounds_var.get()
+        }
+
     def create_card(self, parent, title):
         frame = tk.Frame(parent, bg=CARD_BG, padx=15, pady=15, highlightbackground="#333", highlightthickness=1)
         frame.pack(fill="x", padx=20, pady=10)

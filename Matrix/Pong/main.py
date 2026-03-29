@@ -7,9 +7,11 @@ from display.inside_display import InsideDisplay
 from game_logic.PongGame import PongGame
 from Controller import NetworkManager 
 from Simulator import *
+import pygame
 
 class MasterLauncher:
     def __init__(self, root):
+        pygame.mixer.init()
         self.root = root
         self.root.title("Pong LED Matrix - Master Controller")
         self.root.geometry("500x750")
@@ -29,37 +31,50 @@ class MasterLauncher:
         self.ui = OutsideDisplay(self.root, self.on_start, self.on_stop, self.toggle_pause)
         
         self.root.protocol("WM_DELETE_WINDOW", self.cleanup)
+        self.snd_fail = pygame.mixer.Sound("game_logic/sfx/fail.wav")
 
     def on_start(self):
-        """Pornirea meciului."""
-        # Citim datele din clasa UI externă
-        p1_rgb = COLORS[self.ui.p1_color_name][:3]
-        p2_rgb = COLORS[self.ui.p2_color_name][:3]
-        selected_rounds = self.ui.rounds_var.get()
+        """Pornirea meciului și crearea ferestrelor."""
+        # 1. Datele din UI
+        setup = self.ui.get_selected_setup()
+        
+        # 2. CREARE / RECREARE FEREASTRĂ STADION
+        # Dacă fereastra există deja, o închidem ca să pornim de la zero
+        if hasattr(self, 'arena_window') and self.arena_window.winfo_exists():
+            self.arena_window.destroy()
+        
+        self.arena_window = tk.Toplevel(self.root)
+        self.arena_window.title("STADIUM VIEW")
+        self.arena_window.geometry("800x600+600+100") 
+        self.arena_window.configure(bg="black")
+
+        # 3. Creăm logica și afișajul stadionului
         self.game_engine = PongGame(
-            level=self.ui.difficulty, 
-            p1_rgb=p1_rgb, 
-            p2_rgb=p2_rgb, 
-            total_rounds=selected_rounds
+            level=setup["difficulty"], 
+            p1_rgb=setup["p1_color"], 
+            p2_rgb=setup["p2_color"], 
+            total_rounds=setup["rounds"]
         )
-        self.net_manager = NetworkManager(self.game_engine)
-        self.net_manager.start_bg()
-
-        # Pornește Simulatorul
-        self.sim_window = tk.Toplevel(self.root)
-        self.game_window = MatrixSimulator(self.sim_window)
-
-        # Resetăm vizual stadionul
-        for w in self.arena_window.winfo_children(): w.destroy()
+        
         self.stadium_gui = InsideDisplay(
             container=self.arena_window,
             p1_color_hex=COLORS[self.ui.p1_color_name][3],
             p2_color_hex=COLORS[self.ui.p2_color_name][3],
-            difficulty=self.ui.difficulty,
-            total_rounds=self.ui.rounds_var.get()
+            difficulty=setup["difficulty"],
+            total_rounds=setup["rounds"]
         )
 
+        # 4. Restul pornirii (Simulator, Network, Countdown)
+        if hasattr(self, 'sim_window') and self.sim_window.winfo_exists():
+            self.sim_window.destroy()
+        self.sim_window = tk.Toplevel(self.root)
+        self.game_window = MatrixSimulator(self.sim_window)
+
+        self.net_manager = NetworkManager(self.game_engine)
+        self.net_manager.start_bg()
+        
         self.ui.show_game_controls()
+        self.is_paused = False
         self.run_countdown(3)
 
     def run_countdown(self, seconds):
@@ -101,6 +116,9 @@ class MasterLauncher:
                 if status.startswith("WINNER"):
                     self.trigger_winner_sequence(status)
                     return
+                elif status and status.startswith("GOAL"):
+                    # Redă un sunet de frecvență joasă (400Hz) timp de 500ms
+                    self.snd_fail.play()
                 elif status.startswith("ROUND_OVER"):
                     # Apelăm handler-ul de final de rundă creat anterior
                     self.handle_round_end(status)
@@ -163,16 +181,25 @@ class MasterLauncher:
                 self.game_engine.state = "PLAYING"
 
     def on_stop(self):
-        if self.update_job: self.root.after_cancel(self.update_job)
-        if hasattr(self, 'net_manager'): self.net_manager.running = False
-        
-        # Închidem simulatorul dacă încă mai e deschis
+        """Oprește jocul și închide ferestrele secundare."""
+        # Oprim loop-ul de update
+        if self.update_job: 
+            self.root.after_cancel(self.update_job)
+            self.update_job = None
+            
+        # Oprim rețeaua
+        if hasattr(self, 'net_manager'): 
+            self.net_manager.running = False
+
+        # ÎNCHIDEM ferestrele (Simulator + Stadion)
         if hasattr(self, 'sim_window') and self.sim_window.winfo_exists():
             self.sim_window.destroy()
             
-        # Refacem meniul de start din clasa UI
+        if hasattr(self, 'arena_window') and self.arena_window.winfo_exists():
+            self.arena_window.destroy()
+            
+        # Revenim la meniul principal de Control
         self.ui.setup_ui()
-
     def cleanup(self):
         self.on_stop()
         self.root.destroy()

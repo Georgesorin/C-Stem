@@ -5,6 +5,18 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Controller import *
 
+import random
+
+class Obstacle:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        # Forma de stea (pixeli relativi față de centru)
+        self.shape = [(0,0), (0,-1), (0,1), (-1,0), (1,0)] 
+
+    def get_pixels(self):
+        return [(self.x + dx, self.y + dy) for dx, dy in self.shape]
+
 #pozitia paletei, scorului playerului si indexul jucatorului(jucator 1 si 2), culoarea paletei(la alegere)
 class Player:
     def __init__(self, player_id, color):
@@ -55,7 +67,7 @@ class Ball:
         self.vx = self.base_speed
         self.vy = self.base_speed
 
-    def update(self, p1, p2):
+    def update(self, p1, p2, obstacles=[]):
         self.x += self.vx
         self.y += self.vy
 
@@ -97,11 +109,40 @@ class Ball:
             p1.score += 1
             self.reset()
             return "GOAL_P1"
+        
+        for obs in obstacles:
+            for px, py in obs.get_pixels():
+                # Verificăm dacă mingea "atinge" un pixel al stelei (distanță mică)
+                if abs(self.x - px) < 0.8 and abs(self.y - py) < 0.8:
+                    # 1. Inversăm direcția pe axa Y (sus/jos)
+                    self.vy *= -1
+                    
+                    # 2. ADĂUGĂM HAOS: Schimbăm puțin și viteza pe X (stânga/dreapta)
+                    # random.uniform(-0.2, 0.2) face ca mingea să plece într-un unghi neașteptat
+                    self.vx += random.uniform(-0.2, 0.2)
+                    
+                    # 3. ACCELERARE: Mingea prinde viteză când lovește un obiect
+                    self.vx *= 1.1
+                    self.vy *= 1.1
+                    
+                    # 4. ANTI-STICK: O mișcăm puțin în afara obiectului ca să nu se blocheze
+                    self.y += self.vy * 2
+                    
+                    return "HIT_OBSTACLE"
             
         return None
     
 class PongGame:
     def __init__(self, level="Normal", p1_rgb=(255,0,0), p2_rgb=(0,0,255), total_rounds=3):
+        obs_counts = {"Easy": 0, "Normal": 2, "Hard": 5}
+        count = obs_counts.get(level, 2)
+        
+        self.obstacles = []
+        for _ in range(count):
+            # Generăm coordonate random (evităm marginile și paletele)
+            ox = random.randint(3, 12)
+            oy = random.randint(10, 20)
+            self.obstacles.append(Obstacle(ox, oy))
         configs = {
             "Easy":   {"speed": 0.3, "accel": 1.02},
             "Normal": {"speed": 0.5, "accel": 1.05},
@@ -110,8 +151,8 @@ class PongGame:
         cfg = configs.get(level, configs["Normal"])
         self.total_rounds = total_rounds
         self.button_states = [False] * 512
-        self.p1 = Player(1, RED)
-        self.p2 = Player(2, BLUE)
+        self.p1 = Player(1, p1_rgb)
+        self.p2 = Player(2, p2_rgb)
         self.ball = Ball(base_speed=cfg["speed"], acceleration=cfg["accel"])
         self.running = True
         self.buffer = bytearray(16 * 32 * 3) # Buffer gol
@@ -136,21 +177,69 @@ class PongGame:
         self.p2.score = 0
         self.ball.reset()
         self.state = "COUNTDOWN"
+    
+    def draw_round_small(self, round_num, color):
+        """Desenează 'R' și numărul rundei cu un font foarte mic (3x5)."""
+        # Matrice 3x5 pentru litera R și cifre
+        small_font = {
+            'R': [(0,0), (0,1), (0,2), (0,3), (0,4), (1,0), (2,1), (1,2), (2,3), (2,4)],
+            '1': [(1,0), (1,1), (1,2), (1,3), (1,4)],
+            '2': [(0,0), (1,0), (2,0), (2,1), (1,2), (0,3), (0,4), (1,4), (2,4)],
+            '3': [(0,0), (1,0), (2,0), (2,1), (1,2), (2,3), (0,4), (1,4), (2,4)]
+        }
+        
+        # Desenăm 'R' la coordonatele (x=5, y=25)
+        for dx, dy in small_font['R']:
+            self.set_led(self.buffer, 5 + dx, 25 + dy, color)
+            
+        # Desenăm cifra rundei lângă 'R' la (x=9, y=25)
+        r_str = str(round_num)
+        if r_str in small_font:
+            for dx, dy in small_font[r_str]:
+                self.set_led(self.buffer, 9 + dx, 25 + dy, color)
+    
+    def draw_round_full(self, round_num, color):
+        """Desenează 'ROUND' la y=18 și cifra sub ea la y=26."""
+        font = {
+            'R': [(0,0), (0,1), (0,2), (0,3), (0,4), (1,0), (2,1), (1,2), (2,3)],
+            'O': [(0,0), (1,0), (2,0), (0,1), (2,1), (0,2), (2,2), (0,3), (2,3), (0,4), (1,4), (2,4)],
+            'U': [(0,0), (2,0), (0,1), (2,1), (0,2), (2,2), (0,3), (2,3), (0,4), (1,4), (2,4)],
+            'N': [(0,0), (0,1), (0,2), (0,3), (0,4), (1,1), (2,0), (2,1), (2,2), (2,3), (2,4)],
+            'D': [(0,0), (1,0), (0,1), (2,1), (0,2), (2,2), (0,3), (2,3), (0,4), (1,4)],
+            '1': [(1,0), (1,1), (1,2), (1,3), (1,4)],
+            '2': [(0,0), (1,0), (2,0), (2,1), (0,2), (1,2), (2,2), (0,3), (0,4), (1,4), (2,4)],
+            '3': [(0,0), (1,0), (2,0), (2,1), (1,2), (2,3), (0,4), (1,4), (2,4)]
+        }
 
-    def draw_digit(self, digit, color):
-        """Desenează cifrele 3, 2, 1 pe centrul matricei."""
+        # ROUND la y=18 (cam pe la mijlocul ecranului)
+        letters = [('R', 0), ('O', 3), ('U', 6), ('N', 9), ('D', 12)]
+        for char, x_off in letters:
+            for dx, dy in font[char]:
+                self.set_led(self.buffer, x_off + dx, 18 + dy, color)
+
+        # CIFRA la y=26 (jos, dar cu spațiu față de ROUND)
+        r_str = str(round_num)
+        if r_str in font:
+            for dx, dy in font[r_str]:
+                # Centrat orizontal (x=7)
+                self.set_led(self.buffer, 7 + dx, 26 + dy, color)
+
+    def draw_digit(self, digit, color, y_offset=13): # Am adăugat y_offset implicit 13
+        """Desenează cifrele pe matrice la înălțimea dorită."""
         digits = {
             '3': [(0,0), (1,0), (2,0), (2,1), (0,2), (1,2), (2,2), (2,3), (0,4), (1,4), (2,4)],
             '2': [(0,0), (1,0), (2,0), (2,1), (0,2), (1,2), (2,2), (0,3), (0,4), (1,4), (2,4)],
-            '1': [(1,0), (1,1), (1,2), (1,3), (1,4)]
+            '1': [(1,0), (1,1), (1,2), (1,3), (1,4)],
+            '4': [(0,0), (2,0), (0,1), (2,1), (0,2), (1,2), (2,2), (2,3), (2,4)], # Am adăugat și 4/5 just in case
+            '5': [(0,0), (1,0), (2,0), (0,1), (0,2), (1,2), (2,2), (2,3), (0,4), (1,4), (2,4)]
         }
         
         digit_str = str(digit)
         if digit_str in digits:
             points = digits[digit_str]
-            # x_offset=6, y_offset=13 pentru a centra pe ecranul de 16x32
+            # x_offset=6 rămâne pentru centrare orizontală
             for dx, dy in points:
-                self.set_led(self.buffer, 6 + dx, 13 + dy, color)
+                self.set_led(self.buffer, 6 + dx, y_offset + dy, color)
 
     def draw_stop(self, color):
         """Desenează cuvântul STOP centrat pe matrice."""
@@ -250,7 +339,7 @@ class PongGame:
     def tick(self):
         with self.lock:
             # 1. CAPTURĂM statusul mingii (ex: "GOAL_P1", "GOAL_P2" sau None)
-            status = self.ball.update(self.p1, self.p2)
+            status = self.ball.update(self.p1, self.p2, self.obstacles)
             
             found_p1 = False
             found_p2 = False
@@ -326,12 +415,18 @@ class PongGame:
 
     def render(self):
         self.buffer = bytearray(16 * 32 * 3) # Curățăm mereu la începutul cadrului
-        
-        # --- DACA SUNTEM IN NUMARATOARE ---
+
         if self.state == "COUNTDOWN":
+            # 1. Numărătoarea (3, 2, 1) sus de tot (y=2)
             colors = {3: (255,0,0), 2: (255,255,0), 1: (0,255,0)}
-            c_color = colors.get(self.current_digit, (255,255,255))
-            self.draw_digit(self.current_digit, c_color)
+            c_digit = self.current_digit
+            c_color = colors.get(c_digit, (255,255,255))
+            self.draw_digit(c_digit, c_color, y_offset=2) 
+
+            # 2. Textul "ROUND" la mijloc și cifra jos (funcția de mai sus)
+            # Folosim Cyan pentru un contrast bun
+            self.draw_round_full(self.current_round, (0, 255, 255))
+            
             return self.buffer
 
         # --- DACA SUNTEM LA FINAL DE JOC ---
@@ -356,11 +451,13 @@ class PongGame:
             for y in range(32):
                 self.set_led(self.buffer, 0, y, (0, 255, 0))
                 self.set_led(self.buffer, 15, y, (0, 255, 0))
+            for obs in self.obstacles:
+                for px, py in obs.get_pixels():
+                    self.set_led(self.buffer, int(px), int(py), (255, 215, 0))
 
             # 2. Porti Rosii (Sus/Jos)
             for x in range(1, 15):
-                self.set_led(self.buffer, x, 0, (255, 0, 0))
-                self.set_led(self.buffer, x, 31, (255, 0, 0))
+                self.set_led(self.buffer, x, 15, (0, 255, 255))
 
             # 3. Linie mijloc
             for x in range(1, 15):

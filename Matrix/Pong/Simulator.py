@@ -286,6 +286,10 @@ class MatrixSimulator:
         self.draw_grid()
 
     def update_pixel(self, x, y, r, g, b, timestamp=None):
+        if not hasattr(self, 'rects') or self.rects is None:
+            return
+        if not self.canvas.winfo_exists():
+            return
         if (x, y) in self.rects:
             color = (r, g, b)
             if timestamp is not None: self.pixel_timestamps[(x, y)] = timestamp
@@ -482,6 +486,8 @@ class MatrixSimulator:
                 self.root.after(0, lambda: self.clear_pixels(to_clear))
 
     def clear_pixels(self, pixels):
+        if not hasattr(self, 'canvas') or not self.canvas.winfo_exists():
+            return
         for pos in pixels:
             # self.log(f"Pixel Timeout: {pos}")
             self.update_pixel(pos[0], pos[1], 0, 0, 0, timestamp=0)
