@@ -7,10 +7,8 @@ import subprocess
 import sys
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from dataclasses import dataclass, field
-from typing import List, Tuple
 
-# --- Inițializare Pygame (Suport pentru Resume pe Windows) ---
+# --- Inițializare Pygame (Suport pentru Resume) ---
 HAS_PYGAME = False
 try:
     import pygame
@@ -20,15 +18,16 @@ except:
     print("[!] Eroare Pygame: Muzica nu va funcționa.")
 
 # ==============================================================================
-# --- Configurații Globale & Protocol ---
+# --- Configurații Porturi Hardware (Evil Eye Standard) ---
 # ==============================================================================
-PORT_SEND = 4626 # Control Lumini (Simulator/Hardware IN)
-PORT_RECV = 7800 # Recepție Butoane (Simulator/Hardware OUT)
+PORT_SEND = 4626 # Control Lumini (Hardware IN)
+PORT_RECV = 7800 # Recepție Butoane (Hardware OUT)
 
 COLORS = {
-    "EYE_RED": (255, 0, 0),     # Ochi activ (Pericol)
-    "POINT_CYAN": (0, 255, 255),# Puncte bonus (Colectare)
-    "OFF": (0, 0, 0)            # Stins
+    "EYE_RED": (255, 0, 0),     # Pericol (Watching)
+    "EYE_SAFE": (0, 255, 255),  # Colectare Senzor (Safe)
+    "POINT_YELLOW": (255, 255, 0), # Puncte Bonus (1-10)
+    "OFF": (0, 0, 0)
 }
 
 PASSWORD_ARRAY = [
@@ -62,94 +61,62 @@ def build_packet(cmd, seq, payload=b""):
     return pkt
 
 # ==============================================================================
-# --- Management Hardware (Specific 4 Canale / Pereți) ---
+# --- Management Hardware ---
 # ==============================================================================
+class Wall:
+    def __init__(self, wall_id):
+        self.id = wall_id
+        self.eye_active = False 
+        self.active_points = set() 
+        self.buttons = [False] * 11 
+
 class EvilEyeHardware:
     def __init__(self):
+        self.target_ip = "169.254.182.11"
         self.running = False
-        # Mapare butoane: 4 pereți, fiecare cu senzori (ID 0) și butoane (ID 1-10)
-        self.eye_states = {w: False for w in range(1, 5)} 
-        self.button_states = {w: {l: False for l in range(1, 11)} for w in range(1, 5)}
-        self._led_states = {} # (perete, id_led) -> (r, g, b)
+        self.walls = [Wall(i) for i in range(1, 5)]
         self._seq = 0
-
-    def connect(self, target_ip):
-        self.target_ip = target_ip
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.running = True
-        threading.Thread(target=self.input_listener, daemon=True).start()
-        threading.Thread(target=self.output_streamer, daemon=True).start()
 
-    def set_element(self, wall, led, color):
-        """Setează culoarea pentru un LED specific (0-10) pe un perete specific (1-4)."""
-        self._led_states[(wall, led)] = color
-
-    def output_streamer(self):
-        """Trimite secvența de pachete v11 către hardware."""
-        while self.running:
-            self._seq = (self._seq + 1) & 0xFFFF
-            # Buffer de 132 bytes: 11 LED-uri * 4 Canale * 3 Culori
-            frame = bytearray(132) 
-            for (ch, led), (r, g, b) in self._led_states.items():
-                ch_idx = ch - 1 # 0-3
-                if 0 <= ch_idx < 4 and 0 <= led < 11:
-                    # Managementul canalelor: Intercalare G1,2,3,4 | R1,2,3,4 | B1,2,3,4 per LED
-                    frame[led * 12 + ch_idx] = g 
-                    frame[led * 12 + 4 + ch_idx] = r
-                    frame[led * 12 + 8 + ch_idx] = b
-
-            ep = (self.target_ip, PORT_SEND)
-            try:
-                # Secvența Start -> Config -> Date -> End
-                self.sock.sendto(build_packet(0x3344, self._seq), ep)
-                time.sleep(0.005)
-                fff0_pld = bytearray([0, 11] * 4) # 4 canale, 11 LED-uri per canal
-                self.sock.sendto(build_packet(0x8877, self._seq, fff0_pld), ep)
-                time.sleep(0.005)
-                self.sock.sendto(build_packet(0x8877, 0, frame), ep)
-                time.sleep(0.005)
-                self.sock.sendto(build_packet(0x5566, self._seq), ep)
-            except: pass
-            time.sleep(0.05)
+    def connect(self, ip):
+        self.target_ip = ip
+        if not self.running:
+            self.running = True
+            threading.Thread(target=self.input_listener, daemon=True).start()
 
     def input_listener(self):
-        """Ascultă pachetele 0x88 de la butoanele celor 4 canale."""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try: sock.bind(("0.0.0.0", PORT_RECV))
+        recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        recv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try: recv_sock.bind(("0.0.0.0", PORT_RECV))
         except: return
         while self.running:
             try:
-                data, _ = sock.recvfrom(2048)
+                data, _ = recv_sock.recvfrom(2048)
                 if len(data) >= 687 and data[0] == 0x88:
-                    for ch in range(1, 5):
-                        base = 2 + (ch - 1) * 171
+                    for i in range(4):
+                        base = 2 + i * 171
                         for led in range(11):
-                            is_pressed = (data[base + 1 + led] == 0xCC)
-                            if led == 0: self.eye_states[ch] = is_pressed
-                            else: self.button_states[ch][led] = is_pressed
+                            self.walls[i].buttons[led] = (data[base + 1 + led] == 0xCC)
             except: pass
 
 # ==============================================================================
-# --- Logica Operator & Joc ---
+# --- Logica Operator ---
 # ==============================================================================
 class EvilEyeOperator:
     def __init__(self):
-        self.running = True
         self.hw = EvilEyeHardware()
+        self.running = True
         self.score, self.lives = 0, 5
         self.game_phase = "IDLE"
         self.hit_cooldown = 0
-        self.bonus_points = []
         self.music_file = None
-        self.is_music_paused = False 
-        self.loss_sound_played = False
-        self.active_watching_wall = 0 # Peretele ales aleatoriu la STOP
+        self.is_paused = False
+        self.active_eye_wall = 0 
 
         self.root = tk.Tk()
-        self.root.title("STAFF CONTROL - EVIL EYE (4 CHANNELS)")
-        self.root.geometry("450x550")
+        self.root.title("STAFF CONTROL - EVIL EYE")
+        self.root.geometry("450x650")
         
         self.view = tk.Toplevel(self.root)
         self.view.title("SCOREBOARD")
@@ -161,132 +128,141 @@ class EvilEyeOperator:
         threading.Thread(target=self.game_loop, daemon=True).start()
 
     def setup_staff_ui(self):
-        tk.Label(self.root, text="👁️ EVIL EYE CONTROL", font=("Arial", 14, "bold")).pack(pady=15)
-        self._ip_var = tk.StringVar(value="169.254.182.11")
-        tk.Entry(self.root, textvariable=self._ip_var, width=20).pack()
-        tk.Button(self.root, text="🔗 CONNECT", command=self._connect, bg="#34495e", fg="white").pack(pady=5)
-        self.lbl_status = tk.Label(self.root, text="Status: Deconectat", fg="gray"); self.lbl_status.pack()
+        tk.Label(self.root, text="👁️ EVIL EYE CONTROL", font=("Arial", 16, "bold")).pack(pady=20)
+        
+        # Link Connection Group
+        conn_frame = tk.LabelFrame(self.root, text=" Hardware Setup ", padx=10, pady=10)
+        conn_frame.pack(padx=20, fill="x")
+        
+        tk.Label(conn_frame, text="Device IP:").pack(side=tk.LEFT)
+        self.ip_entry = tk.Entry(conn_frame, width=15)
+        self.ip_entry.insert(0, "169.254.182.11")
+        self.ip_entry.pack(side=tk.LEFT, padx=5)
+        
+        self.btn_conn = tk.Button(conn_frame, text="🔗 CONNECT", command=self._do_connect, bg="#34495e", fg="white")
+        self.btn_conn.pack(side=tk.LEFT)
+        
+        self.lbl_status = tk.Label(self.root, text="Status: Deconectat", fg="gray")
+        self.lbl_status.pack(pady=5)
 
         ttk.Separator(self.root, orient="horizontal").pack(fill="x", pady=10)
-        
+
         tk.Button(self.root, text="📁 Încarcă Muzica", command=self._sel_music).pack()
         self.lbl_song = tk.Label(self.root, text="Niciun fișier", fg="blue"); self.lbl_song.pack(pady=5)
 
-        self.btn_play = tk.Button(self.root, text="▶️ PLAY (Safe Mode)", bg="#27ae60", fg="white", 
-                                  command=self._action_safe, state="disabled", height=2, width=25)
+        self.btn_play = tk.Button(self.root, text="▶️ START (Safe Mode)", bg="green", command=self._action_play, state="disabled", height=2, width=25)
         self.btn_play.pack(pady=5)
-        
-        self.btn_stop = tk.Button(self.root, text="⏸️ STOP (Watching Mode)", bg="#c0392b", fg="white", 
-                                  command=self._action_watching, state="disabled", height=2, width=25)
+        self.btn_stop = tk.Button(self.root, text="⏸️ STOP (Watching Mode)", bg="red", command=self._action_pause, state="disabled", height=2, width=25)
         self.btn_stop.pack(pady=5)
 
     def setup_view_ui(self):
-        tk.Label(self.view, text="EVIL EYE", font=("Impact", 80), bg="black", fg="#ff3333").pack(pady=30)
-        self.lbl_score_v = tk.Label(self.view, text="SCOR: 0", font=("Arial", 60), bg="black", fg="white"); self.lbl_score_v.pack()
-        self.lbl_lives_v = tk.Label(self.view, text="VIEȚI: 5", font=("Arial", 60), bg="black", fg="#ff4444"); self.lbl_lives_v.pack()
-        self.lbl_msg_v = tk.Label(self.view, text="STANDBY", font=("Arial", 40), bg="black", fg="#555555"); self.lbl_msg_v.pack(pady=40)
+        tk.Label(self.view, text="EVIL EYE", font=("Impact", 80), bg="black", fg="red").pack(pady=20)
+        self.lbl_scr = tk.Label(self.view, text="SCOR: 0", font=("Arial", 60), bg="black", fg="white"); self.lbl_scr.pack()
+        self.lbl_lvs = tk.Label(self.view, text="VIEȚI: 5", font=("Arial", 60), bg="black", fg="#ff4444"); self.lbl_lvs.pack()
+        self.lbl_msg = tk.Label(self.view, text="AȘTEPTARE CONEXIUNE...", font=("Arial", 40), bg="black", fg="gray"); self.lbl_msg.pack(pady=40)
 
-    def _connect(self):
-        self.hw.connect(self._ip_var.get())
-        self.lbl_status.config(text=f"✅ CONECTAT", fg="green")
-        self.btn_play.config(state="normal"); self.btn_stop.config(state="normal")
+    def _do_connect(self):
+        ip = self.ip_entry.get()
+        self.hw.connect(ip)
+        self.lbl_status.config(text=f"✅ CONECTAT LA {ip}", fg="green")
+        self.btn_play.config(state="normal")
+        self.btn_stop.config(state="normal")
+        self.lbl_msg.config(text="STANDBY")
 
     def _sel_music(self):
         f = filedialog.askopenfilename(filetypes=[("Audio", "*.mp3 *.wav")])
         if f: self.music_file = f; self.lbl_song.config(text=os.path.basename(f))
 
-    def _action_safe(self):
+    def _action_play(self):
         self.game_phase = "SAFE"
-        self.active_watching_wall = 0 
+        self.active_eye_wall = 0
         if HAS_PYGAME and self.music_file:
-            if self.is_music_paused: pygame.mixer.music.unpause() 
+            if self.is_paused: pygame.mixer.music.unpause() 
             else:
                 pygame.mixer.music.load(self.music_file)
                 pygame.mixer.music.play(-1)
-            self.is_music_paused = False
-        if not self.bonus_points: [self.spawn_point() for _ in range(10)]
+            self.is_paused = False
+        
+        for w in self.hw.walls:
+            w.eye_active = False
+            w.active_points.clear()
+        random.choice(self.hw.walls).eye_active = True
+        self.spawn_random_points(6)
 
-    def _action_watching(self):
+    def _action_pause(self):
         self.game_phase = "WATCHING"
-        self.active_watching_wall = random.randint(1, 4) 
         if HAS_PYGAME:
             pygame.mixer.music.pause()
-            self.is_music_paused = True
+            self.is_paused = True
+        
+        for w in self.hw.walls:
+            w.eye_active = False
+            w.active_points.clear()
+        self.active_eye_wall = random.randint(1, 4)
+        self.hw.walls[self.active_eye_wall-1].eye_active = True
 
-    def spawn_point(self):
-        clrs = [(0,255,255), (255,0,255), (0,255,0), (255,255,0)]
-        self.bonus_points.append({'wall': random.randint(1, 4), 'led': random.randint(1, 10), 
-                                 'color': random.choice(clrs), 'fade': 0.0})
+    def spawn_random_points(self, count):
+        for _ in range(count):
+            w = random.choice(self.hw.walls)
+            led = random.randint(1, 10)
+            w.active_points.add(led)
 
     def game_loop(self):
         while self.running:
             now = time.time()
-            if self.game_phase in ["SAFE", "WATCHING"]:
-                for p in self.bonus_points: p['fade'] = min(1.0, p['fade'] + 0.1)
-                
-                penalty = False
-                for w in range(1, 5):
-                    # 1. Colectare Puncte (Scanare butoane 1-10)
-                    for l in range(1, 11):
-                        if self.hw.button_states[w][l]:
-                            for p in self.bonus_points[:]:
-                                if p['wall'] == w and p['led'] == l:
-                                    self.score += 100; self.bonus_points.remove(p); self.spawn_point()
+            if self.game_phase == "SAFE":
+                for w in self.hw.walls:
+                    if w.eye_active and w.buttons[0]: # Senzor LED 0
+                        self.score += 100
+                        w.eye_active = False
+                        random.choice([wall for wall in self.hw.walls if wall.id != w.id]).eye_active = True
+                        time.sleep(0.3)
                     
-                    # 2. Logica Penalizare - DOAR peretele cu ochiul ROȘU
-                    if self.game_phase == "WATCHING" and w == self.active_watching_wall:
-                        # Verificăm LED 0 (senzor) sau orice alt buton de pe peretele activ
-                        if self.hw.eye_states[w] or any(self.hw.button_states[w].values()):
-                            penalty = True
+                    pts_to_rem = [p for p in w.active_points if w.buttons[p]]
+                    for p in pts_to_rem:
+                        self.score += 100
+                        w.active_points.remove(p)
+                        self.spawn_random_points(1)
 
-                if penalty and now > self.hit_cooldown:
+            elif self.game_phase == "WATCHING":
+                w = self.hw.walls[self.active_eye_wall-1]
+                if (w.buttons[0] or any(w.buttons[1:])) and now > self.hit_cooldown:
                     self.lives -= 1
                     self.hit_cooldown = now + 2.0
-                    if self.lives <= 0: self.game_phase = "GAMEOVER"; self._play_loss()
 
             self._update_hardware()
             self.root.after(0, self._update_ui)
             time.sleep(0.05)
 
     def _update_hardware(self):
-        for w in range(1, 5):
-            # EYE Control: ROȘU dacă e WATCHING și peretele e activ, altfel STINS
-            if self.game_phase == "WATCHING" and w == self.active_watching_wall:
-                eye_col = COLORS["EYE_RED"]
-            else:
-                eye_col = COLORS["OFF"]
-            
-            self.hw.set_element(w, 0, eye_col)
-            # Resetăm butoanele (ID 1-10)
-            for l in range(1, 11): self.hw.set_element(w, l, (0,0,0))
-            
-        # Aprindem punctele active
-        for p in self.bonus_points:
-            c, f = p['color'], p['fade']
-            self.hw.set_element(p['wall'], p['led'], (int(c[0]*f), int(c[1]*f), int(c[2]*f)))
+        if not self.hw.running: return
+        self.hw._seq = (self.hw._seq + 1) & 0xFFFF
+        frame = bytearray(132)
+        for l in range(11):
+            for i, w in enumerate(self.hw.walls):
+                color = COLORS["OFF"]
+                if l == 0 and w.eye_active:
+                    color = COLORS["EYE_RED"] if self.game_phase == "WATCHING" else COLORS["EYE_SAFE"]
+                elif l in w.active_points and self.game_phase == "SAFE":
+                    color = COLORS["POINT_YELLOW"]
+                
+                frame[l * 12 + i] = color[1] # G
+                frame[l * 12 + 4 + i] = color[0] # R
+                frame[l * 12 + 8 + i] = color[2] # B
+
+        try:
+            ep = (self.hw.target_ip, PORT_SEND)
+            self.hw.sock.sendto(build_packet(0x3344, self.hw._seq), ep)
+            self.hw.sock.sendto(build_packet(0x8877, self.hw._seq, bytearray([0, 11]*4)), ep)
+            self.hw.sock.sendto(build_packet(0x8877, 0, frame), ep)
+            self.hw.sock.sendto(build_packet(0x5566, self.hw._seq), ep)
+        except: pass
 
     def _update_ui(self):
-        self.lbl_score_v.config(text=f"SCOR: {self.score}")
-        self.lbl_lives_v.config(text=f"VIEȚI: {max(0, self.lives)}")
-        if self.game_phase == "SAFE": 
-            self.lbl_msg_v.config(text="CULEGE PUNCTELE!", fg="cyan")
-        elif self.game_phase == "WATCHING": 
-            self.lbl_msg_v.config(text=f"OCHI ACTIV: PERETE {self.active_watching_wall}! 👁️", fg="red")
-        elif self.game_phase == "GAMEOVER": 
-            self.lbl_msg_v.config(text="AI FOST PRINS!", fg="white")
-
-    def _play_loss(self):
-        if not self.loss_sound_played and self.music_file:
-            self.loss_sound_played = True
-            if HAS_PYGAME:
-                pygame.mixer.music.stop()
-                m_dir = os.path.dirname(self.music_file)
-                try:
-                    for f in os.listdir(m_dir):
-                        if "sad trombone" in f.lower():
-                            pygame.mixer.music.load(os.path.join(m_dir, f))
-                            pygame.mixer.music.play(); break
-                except: pass
+        self.lbl_scr.config(text=f"SCOR: {self.score}")
+        self.lbl_lvs.config(text=f"VIEȚI: {max(0, self.lives)}")
+        if self.game_phase == "SAFE": self.lbl_msg.config(text="CULEGE PUNCTELE!", fg="cyan")
+        elif self.game_phase == "WATCHING": self.lbl_msg.config(text=f"ATENȚIE: PERETE {self.active_eye_wall}! 👁️", fg="red")
 
 if __name__ == "__main__":
     EvilEyeOperator().root.mainloop()
