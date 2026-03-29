@@ -172,14 +172,30 @@ class MusicalChairsOperator:
             self.hw.connect(found_ip)
             self.btn_start.config(state="normal")
         else:
+            # --- MODIFICARE AICI: Fallback la SIMULATOR ---
             self.lbl_status.config(
-                text="❌ Niciun dispozitiv găsit. Verifică cablul / interfața.",
-                fg="#e74c3c")
+                text="⚠ Niciun device. Trecem pe SIMULATOR (127.0.0.1)", 
+                fg="yellow"
+            )
+            self._ip_var.set("127.0.0.1")
+            self.hw.connect("127.0.0.1") # Forțăm conectarea pe simulator!
+            self.btn_start.config(state="normal")
 
     def _operator_action_safe(self):
         """Muzica pornește, ochiul adoarme → faza SAFE (Matching Pairs)."""
         if self.game_phase == "SAFE":
             return
+
+        self.game_phase = "SAFE"
+        self.generate_pairs()
+        self.ui.update_eye_status("sleeping")
+        self.btn_stop.config(state="normal")
+        self.btn_start.config(state="disabled")
+        self._update_ctrl_info()
+
+        # --- SINCRONIZARE PERFECTĂ ---
+        # Forțăm aplicarea culorilor pe hardware fix acum, înainte să pornească muzica!
+        self._update_hardware()
 
         if self.mixer_works:
             import pygame
@@ -191,14 +207,7 @@ class MusicalChairsOperator:
                 else:
                     pygame.mixer.music.load(song_path)
                     pygame.mixer.music.play(-1)
-                self.music_paused = False
-
-        self.game_phase = "SAFE"
-        self.generate_pairs()
-        self.ui.update_eye_status("sleeping")
-        self.btn_stop.config(state="normal")
-        self.btn_start.config(state="disabled")
-        self._update_ctrl_info()
+            self.music_paused = False
 
     def _operator_action_watching(self):
         """Muzica se oprește, ochiul se deschide → faza WATCHING."""
