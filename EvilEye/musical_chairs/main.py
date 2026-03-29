@@ -3,23 +3,23 @@ import time
 import random
 import threading
 import socket
+import subprocess
 import sys
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-# --- Inițializare Pygame pentru Windows (Resume support) ---
+# --- Inițializare Pygame pentru Windows ---
 HAS_PYGAME = False
 try:
     import pygame
     pygame.mixer.init()
     HAS_PYGAME = True
-except Exception as e:
-    print(f"[!] Pygame Error: {e}")
+except: pass
 
 # ==============================================================================
-# --- Configurații Globale (Sincronizate cu Simulatorul) ---
+# --- Configurații Globale ---
 # ==============================================================================
 PORT_SEND = 4626 # Simulator IN
 PORT_RECV = 7800 # Simulator OUT
@@ -51,8 +51,19 @@ PASSWORD_ARRAY = [
 ]
 
 def calc_checksum(data):
-    idx = sum(data) & 0xFF
-    return PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0
+    return PASSWORD_ARRAY[sum(data) & 0xFF]
+
+# ==============================================================================
+# --- Helperi Pachete Protocol v11 ---
+# ==============================================================================
+def build_packet(cmd, seq, payload=b""):
+    # Format: Start(3344), Config(FFF0), Data(8877), End(5566)
+    internal = bytearray([0x02, 0, 0, (cmd >> 8) & 0xFF, cmd & 0xFF, 0, 0, (len(payload) >> 8) & 0xFF, len(payload) & 0xFF]) + payload
+    hdr = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), (len(internal) >> 8) & 0xFF, len(internal) & 0xFF])
+    pkt = hdr + internal
+    pkt[10], pkt[11] = (seq >> 8) & 0xFF, seq & 0xFF
+    pkt.append(calc_checksum(pkt))
+    return pkt
 
 # ==============================================================================
 # --- Clasa Hardware ---
@@ -60,15 +71,14 @@ def calc_checksum(data):
 class EvilEyeHardware:
     def __init__(self):
         self.running = False
-        self.eye_states = {w: False for w in range(1, 5)}
         self.button_states = {w: {l: False for l in range(11)} for w in range(1, 5)}
         self._led_states = {}
         self._seq = 0
 
     def connect(self, target_ip):
         self.target_ip = target_ip
-        self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.running = True
         threading.Thread(target=self.input_listener, daemon=True).start()
         threading.Thread(target=self.output_streamer, daemon=True).start()
@@ -86,12 +96,21 @@ class EvilEyeHardware:
                     frame[led * 12 + ch_idx] = r
                     frame[led * 12 + 4 + ch_idx] = g
                     frame[led * 12 + 8 + ch_idx] = b
+
+            ep = (self.target_ip, PORT_SEND)
             try:
-                pld = bytearray([0x02, 0, 0, 0x88, 0x77, 0, 1, 0, len(frame)]) + frame
-                hdr = bytearray([0x75, 0, 0, (len(pld)>>8)&0xFF, len(pld)&0xFF])
-                pkt = hdr + pld
-                pkt.append(calc_checksum(pkt))
-                self.sock_send.sendto(pkt, (self.target_ip, PORT_SEND))
+                # SECVENȚA OBLIGATORIE V11
+                self.sock.sendto(build_packet(0x3344, self._seq), ep) # Start
+                time.sleep(0.005)
+                
+                fff0_pld = bytearray([0, 11] * 4) # Config pt 4 walls x 11 leds
+                self.sock.sendto(build_packet(0x8877, self._seq, fff0_pld), ep) # FFF0
+                time.sleep(0.005)
+                
+                self.sock.sendto(build_packet(0x8877, 0, frame), ep) # Data
+                time.sleep(0.005)
+                
+                self.sock.sendto(build_packet(0x5566, self._seq), ep) # End
             except: pass
             time.sleep(0.05)
 
@@ -107,8 +126,7 @@ class EvilEyeHardware:
                     for ch in range(1, 5):
                         base = 2 + (ch - 1) * 171
                         for led in range(11):
-                            val = data[base + 1 + led]
-                            self.button_states[ch][led] = (val == 0xCC)
+                            self.button_states[ch][led] = (data[base + 1 + led] == 0xCC)
             except: pass
 
 # ==============================================================================
@@ -123,7 +141,7 @@ class EvilEyeOperator:
         self.hit_cooldown = 0
         self.bonus_points = []
         self.music_file = None
-        self.is_music_paused = False # Flag pentru resume 
+        self.is_music_paused = False
         self.loss_sound_played = False
 
         self.root = tk.Tk()
@@ -141,12 +159,11 @@ class EvilEyeOperator:
 
     def setup_staff_ui(self):
         tk.Label(self.root, text="👁️ OPERATOR CONTROL", font=("Arial", 14, "bold")).pack(pady=15)
-        self._ip_var = tk.StringVar(value="127.0.0.1")
+        self._ip_var = tk.StringVar(value="169.254.182.11")
         tk.Entry(self.root, textvariable=self._ip_var, width=20).pack()
         tk.Button(self.root, text="🔗 CONNECT", command=self._connect, bg="#34495e", fg="white").pack(pady=5)
         self.lbl_status = tk.Label(self.root, text="Status: Deconectat", fg="gray"); self.lbl_status.pack()
 
-        # FIX: ttk.Separator în loc de tk.Separator
         ttk.Separator(self.root, orient="horizontal").pack(fill="x", pady=10)
         
         tk.Button(self.root, text="📁 Încarcă Muzica", command=self._sel_music).pack()
@@ -178,9 +195,7 @@ class EvilEyeOperator:
     def _action_safe(self):
         self.game_phase = "SAFE"
         if HAS_PYGAME and self.music_file:
-            # Resume logic 
-            if self.is_music_paused:
-                pygame.mixer.music.unpause()
+            if self.is_music_paused: pygame.mixer.music.unpause()
             else:
                 pygame.mixer.music.load(self.music_file)
                 pygame.mixer.music.play(-1)
@@ -191,7 +206,7 @@ class EvilEyeOperator:
         self.game_phase = "WATCHING"
         if HAS_PYGAME:
             pygame.mixer.music.pause()
-            self.is_music_paused = True # Flag pentru resume 
+            self.is_music_paused = True
 
     def spawn_point(self):
         clrs = [(0,255,255), (255,0,255), (0,255,0), (255,255,0)]
