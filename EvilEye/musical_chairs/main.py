@@ -10,7 +10,7 @@ from tkinter import ttk, messagebox, filedialog
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-# --- Inițializare Pygame (Suport pentru Resume) ---
+# --- Inițializare Pygame (Suport pentru Resume pe Windows) ---
 HAS_PYGAME = False
 try:
     import pygame
@@ -22,13 +22,13 @@ except:
 # ==============================================================================
 # --- Configurații Globale & Protocol ---
 # ==============================================================================
-PORT_SEND = 4626 
-PORT_RECV = 7800 
+PORT_SEND = 4626 # Control Lumini (Simulator/Hardware IN)
+PORT_RECV = 7800 # Recepție Butoane (Simulator/Hardware OUT)
 
 COLORS = {
-    "EYE_RED": (255, 0, 0),     # Ochiul care te vede
-    "POINT_CYAN": (0, 255, 255),# Puncte bonus
-    "OFF": (0, 0, 0)
+    "EYE_RED": (255, 0, 0),     # Ochi activ (Pericol)
+    "POINT_CYAN": (0, 255, 255),# Puncte bonus (Colectare)
+    "OFF": (0, 0, 0)            # Stins
 }
 
 PASSWORD_ARRAY = [
@@ -62,14 +62,15 @@ def build_packet(cmd, seq, payload=b""):
     return pkt
 
 # ==============================================================================
-# --- Clasa Hardware ---
+# --- Management Hardware (Specific 4 Canale / Pereți) ---
 # ==============================================================================
 class EvilEyeHardware:
     def __init__(self):
         self.running = False
+        # Mapare butoane: 4 pereți, fiecare cu senzori (ID 0) și butoane (ID 1-10)
         self.eye_states = {w: False for w in range(1, 5)} 
         self.button_states = {w: {l: False for l in range(1, 11)} for w in range(1, 5)}
-        self._led_states = {}
+        self._led_states = {} # (perete, id_led) -> (r, g, b)
         self._seq = 0
 
     def connect(self, target_ip):
@@ -81,25 +82,29 @@ class EvilEyeHardware:
         threading.Thread(target=self.output_streamer, daemon=True).start()
 
     def set_element(self, wall, led, color):
+        """Setează culoarea pentru un LED specific (0-10) pe un perete specific (1-4)."""
         self._led_states[(wall, led)] = color
 
     def output_streamer(self):
+        """Trimite secvența de pachete v11 către hardware."""
         while self.running:
             self._seq = (self._seq + 1) & 0xFFFF
+            # Buffer de 132 bytes: 11 LED-uri * 4 Canale * 3 Culori
             frame = bytearray(132) 
             for (ch, led), (r, g, b) in self._led_states.items():
-                ch_idx = ch - 1
+                ch_idx = ch - 1 # 0-3
                 if 0 <= ch_idx < 4 and 0 <= led < 11:
-                    # Mapare G-R-B (Dacă culorile sunt inversate, schimbă r cu g aici)
+                    # Managementul canalelor: Intercalare G1,2,3,4 | R1,2,3,4 | B1,2,3,4 per LED
                     frame[led * 12 + ch_idx] = g 
                     frame[led * 12 + 4 + ch_idx] = r
                     frame[led * 12 + 8 + ch_idx] = b
 
             ep = (self.target_ip, PORT_SEND)
             try:
+                # Secvența Start -> Config -> Date -> End
                 self.sock.sendto(build_packet(0x3344, self._seq), ep)
                 time.sleep(0.005)
-                fff0_pld = bytearray([0, 11] * 4)
+                fff0_pld = bytearray([0, 11] * 4) # 4 canale, 11 LED-uri per canal
                 self.sock.sendto(build_packet(0x8877, self._seq, fff0_pld), ep)
                 time.sleep(0.005)
                 self.sock.sendto(build_packet(0x8877, 0, frame), ep)
@@ -109,6 +114,7 @@ class EvilEyeHardware:
             time.sleep(0.05)
 
     def input_listener(self):
+        """Ascultă pachetele 0x88 de la butoanele celor 4 canale."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try: sock.bind(("0.0.0.0", PORT_RECV))
@@ -120,9 +126,9 @@ class EvilEyeHardware:
                     for ch in range(1, 5):
                         base = 2 + (ch - 1) * 171
                         for led in range(11):
-                            val = (data[base + 1 + led] == 0xCC)
-                            if led == 0: self.eye_states[ch] = val
-                            else: self.button_states[ch][led] = val
+                            is_pressed = (data[base + 1 + led] == 0xCC)
+                            if led == 0: self.eye_states[ch] = is_pressed
+                            else: self.button_states[ch][led] = is_pressed
             except: pass
 
 # ==============================================================================
@@ -139,10 +145,10 @@ class EvilEyeOperator:
         self.music_file = None
         self.is_music_paused = False 
         self.loss_sound_played = False
-        self.active_watching_wall = 0 
+        self.active_watching_wall = 0 # Peretele ales aleatoriu la STOP
 
         self.root = tk.Tk()
-        self.root.title("STAFF CONTROL - EVIL EYE")
+        self.root.title("STAFF CONTROL - EVIL EYE (4 CHANNELS)")
         self.root.geometry("450x550")
         
         self.view = tk.Toplevel(self.root)
@@ -170,7 +176,7 @@ class EvilEyeOperator:
                                   command=self._action_safe, state="disabled", height=2, width=25)
         self.btn_play.pack(pady=5)
         
-        self.btn_stop = tk.Button(self.root, text="⏸️ STOP (WATCHING)", bg="#c0392b", fg="white", 
+        self.btn_stop = tk.Button(self.root, text="⏸️ STOP (Watching Mode)", bg="#c0392b", fg="white", 
                                   command=self._action_watching, state="disabled", height=2, width=25)
         self.btn_stop.pack(pady=5)
 
@@ -220,16 +226,16 @@ class EvilEyeOperator:
                 
                 penalty = False
                 for w in range(1, 5):
-                    # Colectare puncte (toate butoanele active)
+                    # 1. Colectare Puncte (Scanare butoane 1-10)
                     for l in range(1, 11):
                         if self.hw.button_states[w][l]:
                             for p in self.bonus_points[:]:
                                 if p['wall'] == w and p['led'] == l:
                                     self.score += 100; self.bonus_points.remove(p); self.spawn_point()
                     
-                    # LOGICA PENALIZARE - Doar peretele roșu are senzorul activ
+                    # 2. Logica Penalizare - DOAR peretele cu ochiul ROȘU
                     if self.game_phase == "WATCHING" and w == self.active_watching_wall:
-                        # Verificăm LED 0 (senzor) sau orice alt buton de pe acel perete
+                        # Verificăm LED 0 (senzor) sau orice alt buton de pe peretele activ
                         if self.hw.eye_states[w] or any(self.hw.button_states[w].values()):
                             penalty = True
 
@@ -244,15 +250,17 @@ class EvilEyeOperator:
 
     def _update_hardware(self):
         for w in range(1, 5):
-            # Ochiul este ROȘU doar pe peretele activ, restul sunt STINȘI
+            # EYE Control: ROȘU dacă e WATCHING și peretele e activ, altfel STINS
             if self.game_phase == "WATCHING" and w == self.active_watching_wall:
                 eye_col = COLORS["EYE_RED"]
             else:
                 eye_col = COLORS["OFF"]
             
             self.hw.set_element(w, 0, eye_col)
+            # Resetăm butoanele (ID 1-10)
             for l in range(1, 11): self.hw.set_element(w, l, (0,0,0))
             
+        # Aprindem punctele active
         for p in self.bonus_points:
             c, f = p['color'], p['fade']
             self.hw.set_element(p['wall'], p['led'], (int(c[0]*f), int(c[1]*f), int(c[2]*f)))
