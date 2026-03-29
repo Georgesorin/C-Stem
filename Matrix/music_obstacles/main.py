@@ -35,7 +35,7 @@ except: pass
 
 def _load_config():
     cfg_path = os.path.join(current_script_dir, "config_game.json")
-    defaults = {"device_ip": "127.0.0.1", "send_port": 6766, "recv_port": 6767}
+    defaults = {"device_ip": "255.255.255.255", "send_port": 4626, "recv_port": 7800}
     if os.path.exists(cfg_path):
         try:
             with open(cfg_path, "r") as f: return {**defaults, **json.load(f)}
