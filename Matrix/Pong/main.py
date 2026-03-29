@@ -121,7 +121,10 @@ class MasterLauncher:
                     self.trigger_winner_sequence(status)
                     return
                 elif status and status.startswith("GOAL"):
-                    self.snd_fail.play()
+                    if self.snd_fail: self.snd_fail.play()
+                    self.game_engine.state = "COUNTDOWN"
+                    self.root.after(1000, lambda: self.run_countdown(3))
+                    return
                 elif status.startswith("ROUND_OVER"):
                     self.handle_round_end(status)
                     return
