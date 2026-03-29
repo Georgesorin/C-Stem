@@ -13,7 +13,7 @@ def save_wav(filename, data, sample_rate=44100):
     path = os.path.join(SFX_DIR, filename)
     with wave.open(path, 'w') as f:
         f.setnchannels(1)
-        f.setsampwidth(1) # 8-bit audio
+        f.setsampwidth(1)
         f.setframerate(sample_rate)
         f.writeframes(data)
     print(f"Generated {path}")
@@ -36,7 +36,6 @@ def generate_tone(freq, duration, vol=0.5, type='sine', slide=0):
         elif type == 'noise':
             val = random.uniform(-1, 1)
             
-        # Convert -1.0...1.0 to 0...255
         scaled = int((val * vol + 1.0) * 127.5)
         scaled = max(0, min(255, scaled))
         data.append(scaled)
@@ -44,7 +43,6 @@ def generate_tone(freq, duration, vol=0.5, type='sine', slide=0):
     return data
 
 def mix(data1, data2):
-    # Mix two bytearrays of the same length
     length = min(len(data1), len(data2))
     mixed = bytearray()
     for i in range(length):
@@ -56,22 +54,15 @@ def mix(data1, data2):
     return mixed
 
 def generate_all():
-    # --- SUNET APĂSARE CORECTĂ (Scurt și digital) ---
-    # Tip 'sine' e curat, 'square' e mai retro-joc
     press_ok = generate_tone(880, 0.05, vol=0.3, type='sine') 
     save_wav("press_ok.wav", press_ok)
 
-    # --- SUNET EROARE (Agresiv și descendent) ---
-    # Folosim 'saw' (fierăstrău) și slide negativ pentru un efect de "cădere"
     fail = generate_tone(400, 0.6, vol=0.4, type='saw', slide=-300)
     save_wav("fail.wav", fail)
 
-    # --- SUNET HINT / SCLIPOCIRE (Ca un sonar) ---
-    # Un sunet scurt care să meargă cu ochiul Cyan
     hint = generate_tone(1200, 0.03, vol=0.2, type='sine')
     save_wav("hint.wav", hint)
 
-    # --- SUNET VICTORIE FINALĂ (Arpegiu vesel) ---
     note1 = generate_tone(523, 0.1, type='sine')
     note2 = generate_tone(659, 0.1, type='sine')
     note3 = generate_tone(783, 0.3, type='sine', slide=200)

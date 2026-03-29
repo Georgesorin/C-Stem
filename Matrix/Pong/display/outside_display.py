@@ -35,7 +35,6 @@ class OutsideDisplay:
 
     def get_selected_setup(self):
         """Colectează toate opțiunile alese în interfață și le trimite către joc."""
-        # Luăm tuplul RGB (primele 3 valori) din dicționarul COLORS
         p1_rgb = COLORS[self.p1_color_name][0:3]
         p2_rgb = COLORS[self.p2_color_name][0:3]
         
@@ -83,7 +82,6 @@ class OutsideDisplay:
         tk.Spinbox(rounds_frame, from_=1, to=5, textvariable=self.rounds_var, 
                    bg=BG_BLACK, fg="white", font=("Segoe UI", 14, "bold"), width=10, justify="center").pack()
 
-        # Butonul trimite comanda înapoi la main.py
         self.btn_start = tk.Button(self.container, text="START GAME", bg=ACCENT_GREEN, fg="black", 
                                   font=("Segoe UI", 12, "bold"), relief="flat", pady=12, command=self.start_callback)
         self.btn_start.pack(fill="x", padx=20, pady=20)
@@ -121,7 +119,6 @@ class OutsideDisplay:
         self.container = tk.Frame(self.parent, bg=BG_BLACK)
         self.container.pack(fill="both", expand=True)
 
-        # Am eliminat lbl_score. Punem un titlu simplu sau spațiu.
         tk.Label(self.container, text="GAME IN PROGRESS", 
                  font=("Segoe UI", 14, "bold"), bg=BG_BLACK, fg="#444").pack(pady=60)
 
