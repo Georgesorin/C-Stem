@@ -9,20 +9,20 @@ from tkinter import ttk, messagebox, filedialog
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-# Încercăm să importăm pygame pentru sunet (necesar pe Windows)
+# --- Inițializare Pygame pentru Windows (Resume support) ---
 HAS_PYGAME = False
 try:
     import pygame
     pygame.mixer.init()
     HAS_PYGAME = True
 except Exception as e:
-    print(f"[!] Pygame nu a putut fi inițializat: {e}")
+    print(f"[!] Pygame Error: {e}")
 
 # ==============================================================================
-# --- Configurații Globale ---
+# --- Configurații Globale (Sincronizate cu Simulatorul) ---
 # ==============================================================================
-PORT_SEND = 4626 
-PORT_RECV = 7800 
+PORT_SEND = 4626 # Simulator IN
+PORT_RECV = 7800 # Simulator OUT
 
 COLORS = {
     "EYE_OPEN": (255, 0, 0),    
@@ -55,7 +55,7 @@ def calc_checksum(data):
     return PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0
 
 # ==============================================================================
-# --- Clasa Hardware (Protocol v11 Intercalat) ---
+# --- Clasa Hardware ---
 # ==============================================================================
 class EvilEyeHardware:
     def __init__(self):
@@ -86,7 +86,6 @@ class EvilEyeHardware:
                     frame[led * 12 + ch_idx] = r
                     frame[led * 12 + 4 + ch_idx] = g
                     frame[led * 12 + 8 + ch_idx] = b
-
             try:
                 pld = bytearray([0x02, 0, 0, 0x88, 0x77, 0, 1, 0, len(frame)]) + frame
                 hdr = bytearray([0x75, 0, 0, (len(pld)>>8)&0xFF, len(pld)&0xFF])
@@ -103,14 +102,13 @@ class EvilEyeHardware:
         except: return
         while self.running:
             try:
-                data, _ = sock.recvfrom(1024)
+                data, _ = sock.recvfrom(2048)
                 if len(data) >= 687 and data[0] == 0x88:
                     for ch in range(1, 5):
                         base = 2 + (ch - 1) * 171
                         for led in range(11):
                             val = data[base + 1 + led]
-                            if led == 0: self.eye_states[ch] = (val == 0xCC)
-                            else: self.button_states[ch][led] = (val == 0xCC)
+                            self.button_states[ch][led] = (val == 0xCC)
             except: pass
 
 # ==============================================================================
@@ -120,12 +118,12 @@ class EvilEyeOperator:
     def __init__(self):
         self.running = True
         self.hw = EvilEyeHardware()
-        self.score = 0
-        self.lives = 5
+        self.score, self.lives = 0, 5
         self.game_phase = "IDLE"
         self.hit_cooldown = 0
         self.bonus_points = []
         self.music_file = None
+        self.is_music_paused = False # Flag pentru resume 
         self.loss_sound_played = False
 
         self.root = tk.Tk()
@@ -139,7 +137,6 @@ class EvilEyeOperator:
 
         self.setup_staff_ui()
         self.setup_view_ui()
-
         threading.Thread(target=self.game_loop, daemon=True).start()
 
     def setup_staff_ui(self):
@@ -147,21 +144,19 @@ class EvilEyeOperator:
         self._ip_var = tk.StringVar(value="127.0.0.1")
         tk.Entry(self.root, textvariable=self._ip_var, width=20).pack()
         tk.Button(self.root, text="🔗 CONNECT", command=self._connect, bg="#34495e", fg="white").pack(pady=5)
-        
-        self.lbl_status = tk.Label(self.root, text="Status: Deconectat", fg="gray")
-        self.lbl_status.pack()
+        self.lbl_status = tk.Label(self.root, text="Status: Deconectat", fg="gray"); self.lbl_status.pack()
 
-        # FIX: Folosim ttk.Separator în loc de tk.Separator
+        # FIX: ttk.Separator în loc de tk.Separator
         ttk.Separator(self.root, orient="horizontal").pack(fill="x", pady=10)
         
         tk.Button(self.root, text="📁 Încarcă Muzica", command=self._sel_music).pack()
         self.lbl_song = tk.Label(self.root, text="Niciun fișier", fg="blue"); self.lbl_song.pack(pady=5)
 
-        self.btn_play = tk.Button(self.root, text="▶️ START (Ochi ÎNCHIS)", bg="#27ae60", fg="white", 
+        self.btn_play = tk.Button(self.root, text="▶️ PLAY (Safe)", bg="#27ae60", fg="white", 
                                   command=self._action_safe, state="disabled", height=2, width=25)
         self.btn_play.pack(pady=5)
         
-        self.btn_stop = tk.Button(self.root, text="👁️ STOP (Ochi DESCHIS)", bg="#c0392b", fg="white", 
+        self.btn_stop = tk.Button(self.root, text="⏸️ PAUSE (Watching)", bg="#c0392b", fg="white", 
                                   command=self._action_watching, state="disabled", height=2, width=25)
         self.btn_stop.pack(pady=5)
 
@@ -173,61 +168,53 @@ class EvilEyeOperator:
 
     def _connect(self):
         self.hw.connect(self._ip_var.get())
-        self.lbl_status.config(text="✅ CONECTAT", fg="green")
-        self.btn_play.config(state="normal")
-        self.btn_stop.config(state="normal")
+        self.lbl_status.config(text=f"✅ CONECTAT LA {self._ip_var.get()}", fg="green")
+        self.btn_play.config(state="normal"); self.btn_stop.config(state="normal")
 
     def _sel_music(self):
-        f = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.wav *.ogg")])
-        if f: 
-            self.music_file = f
-            self.lbl_song.config(text=os.path.basename(f))
+        f = filedialog.askopenfilename(filetypes=[("Audio", "*.mp3 *.wav")])
+        if f: self.music_file = f; self.lbl_song.config(text=os.path.basename(f))
 
     def _action_safe(self):
         self.game_phase = "SAFE"
-        # FIX: Folosim Pygame pentru muzică în loc de afplay (Windows compatibil)
         if HAS_PYGAME and self.music_file:
-            pygame.mixer.music.load(self.music_file)
-            pygame.mixer.music.play(-1)
-        if not self.bonus_points: 
-            for _ in range(8): self.spawn_point()
+            # Resume logic 
+            if self.is_music_paused:
+                pygame.mixer.music.unpause()
+            else:
+                pygame.mixer.music.load(self.music_file)
+                pygame.mixer.music.play(-1)
+            self.is_music_paused = False
+        if not self.bonus_points: [self.spawn_point() for _ in range(8)]
 
     def _action_watching(self):
         self.game_phase = "WATCHING"
         if HAS_PYGAME:
             pygame.mixer.music.pause()
+            self.is_music_paused = True # Flag pentru resume 
 
     def spawn_point(self):
         clrs = [(0,255,255), (255,0,255), (0,255,0), (255,255,0)]
-        w = random.randint(1, 4)
-        l = random.randint(1, 10)
-        self.bonus_points.append({'wall': w, 'led': l, 'color': random.choice(clrs), 'fade': 0.0})
+        self.bonus_points.append({'wall': random.randint(1, 4), 'led': random.randint(1, 10), 
+                                 'color': random.choice(clrs), 'fade': 0.0})
 
     def game_loop(self):
         while self.running:
             now = time.time()
             if self.game_phase in ["SAFE", "WATCHING"]:
                 for p in self.bonus_points: p['fade'] = min(1.0, p['fade'] + 0.1)
-
                 penalty = False
                 for w in range(1, 5):
                     for l in range(1, 11):
                         if self.hw.button_states[w][l]:
                             for p in self.bonus_points[:]:
                                 if p['wall'] == w and p['led'] == l:
-                                    self.score += 100
-                                    self.bonus_points.remove(p)
-                                    self.spawn_point()
+                                    self.score += 100; self.bonus_points.remove(p); self.spawn_point()
                             if self.game_phase == "WATCHING" and now > self.hit_cooldown:
                                 penalty = True
-
                 if penalty:
-                    self.lives -= 1
-                    self.hit_cooldown = now + 1.5
-                    if self.lives <= 0:
-                        self.game_phase = "GAMEOVER"
-                        self._play_loss()
-
+                    self.lives -= 1; self.hit_cooldown = now + 1.5
+                    if self.lives <= 0: self.game_phase = "GAMEOVER"; self._play_loss()
             self._update_hardware()
             self.root.after(0, self._update_ui)
             time.sleep(0.05)
@@ -237,7 +224,6 @@ class EvilEyeOperator:
         for w in range(1, 5):
             self.hw.set_element(w, 0, eye_col)
             for l in range(1, 11): self.hw.set_element(w, l, (0,0,0))
-        
         for p in self.bonus_points:
             c, f = p['color'], p['fade']
             self.hw.set_element(p['wall'], p['led'], (int(c[0]*f), int(c[1]*f), int(c[2]*f)))
@@ -259,8 +245,7 @@ class EvilEyeOperator:
                     for f in os.listdir(m_dir):
                         if "sad trombone" in f.lower():
                             pygame.mixer.music.load(os.path.join(m_dir, f))
-                            pygame.mixer.music.play()
-                            break
+                            pygame.mixer.music.play(); break
                 except: pass
 
 if __name__ == "__main__":
