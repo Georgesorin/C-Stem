@@ -26,9 +26,9 @@ PORT_SEND = 4626 # Simulator IN
 PORT_RECV = 7800 # Simulator OUT
 
 COLORS = {
-    "EYE_OPEN": (255, 0, 0),    # Roșu
-    "EYE_CLOSED": (0, 40, 0),   # Verde stins
-    "POINT": (0, 255, 255),     # Cyan
+    "EYE_OPEN": (255, 0, 0),    # Roșu (Atac)
+    "EYE_CLOSED": (0, 40, 0),   # Verde stins (Sigur)
+    "POINT": (0, 255, 255),     # Cyan (Punct bonus)
     "OFF": (0, 0, 0)
 }
 
@@ -55,9 +55,7 @@ def calc_checksum(data):
     return PASSWORD_ARRAY[sum(data) & 0xFF]
 
 def build_packet(cmd, seq, payload=b""):
-    # Antet intern: 0x02, 0, 0, command_id, location, payload_len
     internal = bytearray([0x02, 0, 0, (cmd >> 8) & 0xFF, cmd & 0xFF, 0, 0, (len(payload) >> 8) & 0xFF, len(payload) & 0xFF]) + payload
-    # Antet extern: 0x75, rand, rand, internal_len
     hdr = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), (len(internal) >> 8) & 0xFF, len(internal) & 0xFF])
     pkt = hdr + internal
     pkt[10], pkt[11] = (seq >> 8) & 0xFF, seq & 0xFF
@@ -65,12 +63,12 @@ def build_packet(cmd, seq, payload=b""):
     return pkt
 
 # ==============================================================================
-# --- Clasa Hardware (Protocol v11 Complet) ---
+# --- Clasa Hardware ---
 # ==============================================================================
 class EvilEyeHardware:
     def __init__(self):
         self.running = False
-        self.eye_states = {w: False for w in range(1, 5)} # Senzori mișcare (LED 0)
+        self.eye_states = {w: False for w in range(1, 5)} 
         self.button_states = {w: {l: False for l in range(1, 11)} for w in range(1, 5)}
         self._led_states = {}
         self._seq = 0
@@ -93,22 +91,20 @@ class EvilEyeHardware:
             for (ch, led), (r, g, b) in self._led_states.items():
                 ch_idx = ch - 1
                 if 0 <= ch_idx < 4 and 0 <= led < 11:
-                    # Logica de intercalare corectă G-R-B
                     frame[led * 12 + ch_idx] = g
                     frame[led * 12 + 4 + ch_idx] = r
                     frame[led * 12 + 8 + ch_idx] = b
 
             ep = (self.target_ip, PORT_SEND)
             try:
-                # SECVENȚA OBLIGATORIE DE PROTOCOL
-                self.sock.sendto(build_packet(0x3344, self._seq), ep) # Start
+                self.sock.sendto(build_packet(0x3344, self._seq), ep)
                 time.sleep(0.005)
                 fff0_pld = bytearray([0, 11] * 4)
-                self.sock.sendto(build_packet(0x8877, self._seq, fff0_pld), ep) # FFF0
+                self.sock.sendto(build_packet(0x8877, self._seq, fff0_pld), ep)
                 time.sleep(0.005)
-                self.sock.sendto(build_packet(0x8877, 0, frame), ep) # Date Pixeli
+                self.sock.sendto(build_packet(0x8877, 0, frame), ep)
                 time.sleep(0.005)
-                self.sock.sendto(build_packet(0x5566, self._seq), ep) # End
+                self.sock.sendto(build_packet(0x5566, self._seq), ep)
             except: pass
             time.sleep(0.05)
 
@@ -130,7 +126,7 @@ class EvilEyeHardware:
             except: pass
 
 # ==============================================================================
-# --- Logica Operator & Joc ---
+# --- Logica Operator ---
 # ==============================================================================
 class EvilEyeOperator:
     def __init__(self):
@@ -141,8 +137,9 @@ class EvilEyeOperator:
         self.hit_cooldown = 0
         self.bonus_points = []
         self.music_file = None
-        self.is_music_paused = False 
+        self.is_music_paused = False
         self.loss_sound_played = False
+        self.active_watching_wall = 0 # 0 înseamnă niciunul
 
         self.root = tk.Tk()
         self.root.title("STAFF CONTROL")
@@ -173,7 +170,7 @@ class EvilEyeOperator:
                                   command=self._action_safe, state="disabled", height=2, width=25)
         self.btn_play.pack(pady=5)
         
-        self.btn_stop = tk.Button(self.root, text="⏸️ PAUSE (Watching Mode)", bg="#c0392b", fg="white", 
+        self.btn_stop = tk.Button(self.root, text="⏸️ STOP (Watching Mode)", bg="#c0392b", fg="white", 
                                   command=self._action_watching, state="disabled", height=2, width=25)
         self.btn_stop.pack(pady=5)
 
@@ -194,8 +191,9 @@ class EvilEyeOperator:
 
     def _action_safe(self):
         self.game_phase = "SAFE"
+        self.active_watching_wall = 0 # Resetăm ochiul activ
         if HAS_PYGAME and self.music_file:
-            if self.is_music_paused: pygame.mixer.music.unpause()
+            if self.is_music_paused: pygame.mixer.music.unpause() # RESUME DIN ACELAȘI LOC
             else:
                 pygame.mixer.music.load(self.music_file)
                 pygame.mixer.music.play(-1)
@@ -204,6 +202,7 @@ class EvilEyeOperator:
 
     def _action_watching(self):
         self.game_phase = "WATCHING"
+        self.active_watching_wall = random.randint(1, 4) # ALEGEM ALEATORIU UN PERETE CARE SĂ PAZEASCĂ
         if HAS_PYGAME:
             pygame.mixer.music.pause()
             self.is_music_paused = True
@@ -228,9 +227,9 @@ class EvilEyeOperator:
                                 if p['wall'] == w and p['led'] == l:
                                     self.score += 100; self.bonus_points.remove(p); self.spawn_point()
                     
-                    # Logica Penalizare Senzor + Butoane
-                    if self.game_phase == "WATCHING":
-                        # Dacă senzorul (LED 0) vede mișcare SAU cineva apasă butoane pe acel perete
+                    # Logica Penalizare - DOAR PENTRU PERETELE ACTIV
+                    if self.game_phase == "WATCHING" and w == self.active_watching_wall:
+                        # Dacă senzorul (LED 0) vede mișcare SAU cineva apasă butoane pe acel perete activ
                         if self.hw.eye_states[w] or any(self.hw.button_states[w].values()):
                             penalty = True
 
@@ -244,10 +243,16 @@ class EvilEyeOperator:
             time.sleep(0.05)
 
     def _update_hardware(self):
-        eye_col = COLORS["EYE_OPEN"] if self.game_phase == "WATCHING" else COLORS["EYE_CLOSED"]
         for w in range(1, 5):
+            # Ochiul este deschis (ROȘU) doar pe peretele activ ales la STOP
+            if self.game_phase == "WATCHING" and w == self.active_watching_wall:
+                eye_col = COLORS["EYE_OPEN"]
+            else:
+                eye_col = COLORS["EYE_CLOSED"]
+            
             self.hw.set_element(w, 0, eye_col)
             for l in range(1, 11): self.hw.set_element(w, l, (0,0,0))
+            
         for p in self.bonus_points:
             c, f = p['color'], p['fade']
             self.hw.set_element(p['wall'], p['led'], (int(c[0]*f), int(c[1]*f), int(c[2]*f)))
@@ -255,9 +260,12 @@ class EvilEyeOperator:
     def _update_ui(self):
         self.lbl_score_v.config(text=f"SCOR: {self.score}")
         self.lbl_lives_v.config(text=f"VIEȚI: {max(0, self.lives)}")
-        if self.game_phase == "SAFE": self.lbl_msg_v.config(text="CULEGE PUNCTELE!", fg="cyan")
-        elif self.game_phase == "WATCHING": self.lbl_msg_v.config(text="NU TE MIȘCA! 👁️", fg="red")
-        elif self.game_phase == "GAMEOVER": self.lbl_msg_v.config(text="JOC TERMINAT!", fg="white")
+        if self.game_phase == "SAFE": 
+            self.lbl_msg_v.config(text="CULEGE PUNCTELE!", fg="cyan")
+        elif self.game_phase == "WATCHING": 
+            self.lbl_msg_v.config(text=f"ATENȚIE LA PERETELE {self.active_watching_wall}! 👁️", fg="red")
+        elif self.game_phase == "GAMEOVER": 
+            self.lbl_msg_v.config(text="JOC TERMINAT!", fg="white")
 
     def _play_loss(self):
         if not self.loss_sound_played and self.music_file:
