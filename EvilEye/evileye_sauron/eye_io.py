@@ -2,6 +2,8 @@
 import socket
 import threading
 import time
+import random
+import psutil
 from config_eye import *
 
 # Tabelul de parole pentru Checksum (WIKI)
@@ -29,7 +31,6 @@ def calc_checksum(data):
     return PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0
 
 def build_command_packet(data_id, msg_loc, payload, seq):
-    import random
     internal = bytes([
         0x02, 0x00, 0x00,
         (data_id >> 8) & 0xFF, data_id & 0xFF,
@@ -43,13 +44,11 @@ def build_command_packet(data_id, msg_loc, payload, seq):
     return bytes(pkt)
 
 def build_start_packet(seq):
-    import random
     pkt = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), 0x00, 0x08, 0x02, 0x00, 0x00, 0x33, 0x44, (seq >> 8) & 0xFF, seq & 0xFF, 0x00, 0x00])
     pkt.append(calc_checksum(pkt))
     return bytes(pkt)
 
 def build_end_packet(seq):
-    import random
     pkt = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), 0x00, 0x08, 0x02, 0x00, 0x00, 0x55, 0x66, (seq >> 8) & 0xFF, seq & 0xFF, 0x00, 0x00])
     pkt.append(calc_checksum(pkt))
     return bytes(pkt)
@@ -59,12 +58,103 @@ def build_fff0_packet(seq):
     for _ in range(4): payload += bytes([0x00, 0x0B]) # 11 LEDs (1 Ochi + 10 Butoane)
     return build_command_packet(0x8877, 0xFFF0, bytes(payload), seq)
 
+# --- FUNCTII NOI PENTRU HARDWARE DISCOVERY ---
+def get_local_interfaces():
+    interfaces = []
+    try:
+        for iface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    bcast = addr.broadcast if addr.broadcast else "255.255.255.255"
+                    interfaces.append((iface, addr.address, bcast))
+    except:
+        interfaces.append(("Default", "0.0.0.0", "255.255.255.255"))
+    return interfaces
+
+def build_discovery_packet():
+    rand1, rand2 = random.randint(0, 127), random.randint(0, 127)
+    payload = bytearray([0x0A, 0x02, *b"KX-HC04", 0x03, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x14])
+    pkt = bytearray([0x67, rand1, rand2, len(payload)]) + payload
+    pkt.append(calc_checksum(pkt))
+    return pkt, rand1, rand2
+
+def run_discovery_flow():
+    interfaces = get_local_interfaces()
+    if not interfaces:
+        print("No active network interfaces found.")
+        return None, "0.0.0.0"
+    
+    print("\n" + "="*40)
+    print("--- LEDHACK - Network Selection ---")
+    print("Alege reteaua conectata la Evil Eye:")
+    for i, (iface, ip, bcast) in enumerate(interfaces):
+        print(f"[{i}] {iface} - {ip}")
+    print("="*40)
+    
+    try:
+        choice = int(input("\nSelecteaza numarul: "))
+        sel = interfaces[choice]
+    except:
+        sel = interfaces[0]
+        print("Alegere invalida. Folosim default 0.")
+        
+    print(f"\nIncercam pe interfata {sel[0]} ({sel[1]})")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    
+    try: sock.bind((sel[1], 7800)) # Bind pe portul cerut de protocol
+    except: pass
+    
+    pkt, r1, r2 = build_discovery_packet()
+    try: sock.sendto(pkt, (sel[2], 4626)) # Trimitem broadcast
+    except Exception as e: 
+        print("Eroare la trimitere broadcast.")
+        return None, sel[1]
+        
+    print("Cautam peretii in retea... Asteapta.")
+    sock.settimeout(0.5)
+    end_time = time.time() + 3
+    devices = []
+    
+    while time.time() < end_time:
+        try:
+            data, addr = sock.recvfrom(1024)
+            if len(data) >= 30 and data[0] == 0x68 and data[1] == r1 and data[2] == r2:
+                if addr[0] not in [d['ip'] for d in devices]:
+                    model = data[6:13].decode(errors='ignore').strip('\x00')
+                    devices.append({'ip': addr[0], 'model': model})
+                    print(f" > GASIT: {model} la IP-ul {addr[0]}")
+        except socket.timeout: continue
+        except: pass
+        
+    sock.close()
+    
+    if devices:
+        target = devices[0]['ip']
+        print(f"Setat! Trimitem culorile catre {target}\n")
+        return target, sel[1]
+        
+    print("Nu am gasit nimic, folosim setarile din fisierul de config (Simulator).\n")
+    return None, sel[1]
+
+# ---------------------------------------------
+
 class EvilEyeHardware:
     def __init__(self):
+        # 1. Rulăm scanarea rețelei
+        discovered_ip, selected_iface_ip = run_discovery_flow()
+        
+        # 2. Salvăm IP-urile (Dacă a găsit hardware, folosește IP-ul lui. Dacă nu, TARGET_IP din config pt Simulator)
+        self.target_ip = discovered_ip if discovered_ip else TARGET_IP
+        self.bind_ip = selected_iface_ip
+        
+        # 3. Deschidem socket-ul pt trimitere fix pe interfața de cablu aleasă!
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try: self.sock_send.bind((self.bind_ip, 0))
+        except: pass
         
-        # Structuri actualizate (1-4 pentru pereți)
+        # Structuri logice (1-4 pentru pereți)
         self.button_states = {w: [False]*11 for w in range(1, 5)} 
         self.eye_states = {w: False for w in range(1, 5)} 
         
@@ -72,7 +162,7 @@ class EvilEyeHardware:
         self._seq = 0
         self.running = True
         
-        # Output-ul curge la infinit pe un thread separat, altfel hardware-ul dă freeze!
+        # Pornim firele de execuție
         threading.Thread(target=self.input_listener, daemon=True).start()
         threading.Thread(target=self.output_streamer, daemon=True).start()
 
@@ -92,10 +182,11 @@ class EvilEyeHardware:
                     frame[led * 12 + 4 + ch_idx] = r
                     frame[led * 12 + 8 + ch_idx] = b
 
-            ep = (TARGET_IP, PORT_SEND)
+            # Folosim self.target_ip (gasit de discovery)
+            ep = (self.target_ip, PORT_SEND)
             try:
                 self.sock_send.sendto(build_start_packet(self._seq), ep)
-                time.sleep(0.008) # 8ms delay obligatoriu conform WIKI
+                time.sleep(0.008) # 8ms delay obligatoriu
                 self.sock_send.sendto(build_fff0_packet(self._seq), ep)
                 time.sleep(0.008)
                 self.sock_send.sendto(build_command_packet(0x8877, 0x0000, bytes(frame), self._seq), ep)
@@ -109,7 +200,9 @@ class EvilEyeHardware:
         """Ascultă pachetul complex de 687 bytes de la Evil Eye"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try: sock.bind(("0.0.0.0", PORT_RECV))
+        
+        # E mai sigur "0.0.0.0" la citire ca să prindă tot de pe toate porturile
+        try: sock.bind(("0.0.0.0", PORT_RECV)) 
         except: return
         
         while self.running:
