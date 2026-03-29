@@ -9,3 +9,5 @@ youtube-search-python
 
 # Dependență critică pentru căutare (versiunea cerută de codul tău)
 httpx==0.27.2
+
+python-tk
