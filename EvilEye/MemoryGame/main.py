@@ -246,18 +246,14 @@ class MasterLauncher:
                 self.network.set_led(target_wall, 0, 0, 0, 0)
                 time.sleep(0.2)
             else:
-                time.sleep(0.1) # Verificare deasă a condițiilor
+                time.sleep(0.1)
 
-        # Dacă am ieșit din While, înseamnă că timpul a expirat
         if not self.stop_timer_event.is_set() and self.game_running:
             self.root.after(0, self._handle_timeout)
 
     def _handle_timeout(self):
-        """Ce se întâmplă când expiră cele 15 secunde."""
-        # Considerăm timeout-ul ca fiind un Game Over (Eșec)
-        # Folosim peretele 1 ca referință pentru animația de fail dacă nu a apăsat nimic
         self.snd_fail.play()
-        self._process_press(1, 99) # Trimitem un index de LED care nu există ca să forțăm FAIL
+        self._process_press(1, 99)
 
     def stop_game(self):
         self.game_running = False
@@ -275,14 +271,11 @@ class MasterLauncher:
         self.root.destroy()
 
 if __name__ == "__main__":
-    # --- PASUL 1: SCANARE (DISCOVERY) ---
-    # Aceasta va deschide meniul în consolă pentru selectarea rețelei
     discovered_ip = run_discovery_flow()
     
     root = tk.Tk()
     app = MasterLauncher(root)
     
-    # --- PASUL 2: INJECTARE IP ---
     if discovered_ip:
         print(f"📡 Conectare la dispozitiv real: {discovered_ip}")
         app.network.set_device(discovered_ip)

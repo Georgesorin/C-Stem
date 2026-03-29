@@ -4,7 +4,7 @@ import threading
 class MemoryGame:
     def __init__(self, num_players=2):
         self.num_players = num_players
-        self.max_steps = 10     # Limita impusă de tine
+        self.max_steps = 10
         self.level = 1
         self.sequence = []      
         self.current_step = 0
@@ -20,13 +20,12 @@ class MemoryGame:
         return [1, 2, 3, 4]
 
     def add_next_step(self):
-        """Alege un pas nou și resetează indexul pentru verificare."""
         wall = random.choice(self.active_walls)
         led = random.randint(1, 10)
         
         self.sequence.append((wall, led))
         self.current_step = 0
-        return (wall, led) # Returnăm DOAR ultimul pas pentru a fi afișat
+        return (wall, led)
 
     def check_press(self, wall, led):
         if self.state != "WAITING" or self.current_step >= len(self.sequence):
@@ -42,7 +41,6 @@ class MemoryGame:
                 return "LEVEL_COMPLETE"
             return "STEP_CORRECT"
         else:
-            # Dacă intră aici, e clar GAME OVER
             self.state = "FAIL" 
             return "GAME_OVER"
 

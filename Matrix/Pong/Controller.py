@@ -135,7 +135,7 @@ class NetworkManager:
         start_packet.append(0x00) 
         try: 
             self.sock_send.sendto(start_packet, (target_ip, port))
-            self.sock_send.sendto(start_packet, ("255.255.255.255", port))
+            self.sock_send.sendto(start_packet, ("127.0.0.1", port))
         except: pass
 
         # --- 2. FFF0 Packet ---
@@ -164,7 +164,7 @@ class NetworkManager:
         
         try: 
             self.sock_send.sendto(fff0_packet, (target_ip, port))
-            self.sock_send.sendto(fff0_packet, ("255.255.255.255", port))
+            self.sock_send.sendto(fff0_packet, ("127.0.0.1", port))
         except: pass
         
         # --- 3. Data Packets ---
@@ -201,7 +201,7 @@ class NetworkManager:
             
             try: 
                 self.sock_send.sendto(packet, (target_ip, port))
-                self.sock_send.sendto(packet, ("255.255.255.255", port))
+                self.sock_send.sendto(packet, ("127.0.0.1", port))
             except: pass
             
             data_packet_index += 1
@@ -221,7 +221,7 @@ class NetworkManager:
         end_packet.append(0x00) 
         try: 
             self.sock_send.sendto(end_packet, (target_ip, port))
-            self.sock_send.sendto(end_packet, ("255.255.255.255", port))
+            self.sock_send.sendto(end_packet, ("127.0.0.1", port))
         except: pass
 
 class MatrixGUI:

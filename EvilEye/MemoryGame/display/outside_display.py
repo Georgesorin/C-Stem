@@ -23,7 +23,7 @@ class ControlPanel:
         tk.Label(self.main_container, text="NEON MEMORY", font=("Segoe UI", 32, "bold"), 
                  bg=self.C_BG, fg=self.C_ACCENT).pack(pady=(60, 40))
         
-        # --- SETUP AREA ---
+        # SETUP AREA 
         self.config_frame = tk.Frame(self.main_container, bg=self.C_BG)
         self.config_frame.pack(fill="x")
 
@@ -53,7 +53,7 @@ class ControlPanel:
                                    command=self._internal_start)
         self.btn_start.pack(fill="x", pady=40)
 
-        # --- ACTIVE CONTROLS ---
+        # ACTIVE CONTROLS
         self.controls_frame = tk.Frame(self.main_container, bg=self.C_BG)
 
         self.btn_stop = tk.Button(self.controls_frame, text="PAUSE SYSTEM", bg=self.C_AMBER, 
@@ -70,7 +70,7 @@ class ControlPanel:
         
         self.btn_end.pack(side="bottom", pady=(20, 0))
 
-        # --- OVERLAY ---
+        # OVERLAY
         self.overlay_frame = tk.Frame(parent, bg=self.C_BG)
         self.lbl_result = tk.Label(self.overlay_frame, text="", font=("Segoe UI", 30, "bold"), 
                                    bg=self.C_BG, justify="center")
