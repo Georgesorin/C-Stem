@@ -47,48 +47,75 @@ class MusicalChairsOperator:
         self.create_operator_controls()
         self.ui.run()
 
+   # main_musical_chairs.py - Secțiunea create_operator_controls actualizată
     def create_operator_controls(self):
         self.ctrl = tk.Toplevel()
-        self.ctrl.title("Control Hardware")
-        self.ctrl.geometry("380x400")
-        self.ctrl.attributes("-topmost", True) 
-        self.ctrl.configure(padx=10, pady=10)
-
-        # Buton Verificare Rețea
-        tk.Label(self.ctrl, text="PAS 1: TESTARE CONEXIUNE", font=("Arial", 9, "bold")).pack(pady=5)
-        self.btn_check = tk.Button(self.ctrl, text="🔍 CHECK CONNECTION (Flash All)", 
-                                   bg="#333", fg="white", font=("Arial", 10, "bold"),
-                                   command=self.check_connection_flash)
-        self.btn_check.pack(fill=tk.X, pady=5)
-
-        ttk.Separator(self.ctrl, orient='horizontal').pack(fill='x', pady=10)
-
-        tk.Label(self.ctrl, text="PAS 2: ALEGEȚI MELODIA", font=("Arial", 9, "bold")).pack(pady=5)
-        self.songs = [f for f in os.listdir("music") if f.endswith(('.mp3', '.wav'))]
-        self.song_combo = ttk.Combobox(self.ctrl, values=self.songs, state="readonly")
-        if self.songs: self.song_combo.current(0)
-        self.song_combo.pack(fill=tk.X, pady=5)
+        self.ctrl.title("Hardware Setup & Discovery")
+        self.ctrl.geometry("450x500")
+        self.ctrl.configure(bg="#1a1a1a", padx=15, pady=15)
         
-        self.btn_start = tk.Button(self.ctrl, text="▶ START JOC (Muzică ON)", bg="#44bb44", fg="white",
-                                   font=("Arial", 11, "bold"), command=self.operator_action_safe, height=2)
-        self.btn_start.pack(fill=tk.X, pady=10)
+        # 1. SELECTARE INTERFAȚĂ (Cea mai importantă parte din Team_collect)
+        tk.Label(self.ctrl, text="1. ALEGE PLACA DE REȚEA (INTERFAȚA)", fg="white", bg="#1a1a1a", font=("Arial", 9, "bold")).pack(anchor="w")
+        self.iface_var = tk.StringVar()
+        self.iface_combo = ttk.Combobox(self.ctrl, textvariable=self.iface_var, state="readonly", width=45)
+        self.iface_combo.pack(pady=5)
+        self.refresh_interfaces()
         
-        self.btn_stop = tk.Button(self.ctrl, text="👁 PAUZĂ (Ochi ROȘU)", bg="#ff4444", fg="white",
-                                  font=("Arial", 11, "bold"), command=self.operator_action_watching, height=2, state="disabled") 
-        self.btn_stop.pack(fill=tk.X, pady=5)
+        # 2. DISCOVERY (Butonul care "trezește" ochiul)
+        tk.Label(self.ctrl, text="2. GĂSEȘTE DISPOZITIVUL", fg="white", bg="#1a1a1a", font=("Arial", 9, "bold")).pack(anchor="w", pady=(10,0))
+        self.ip_var = tk.StringVar(value=TARGET_IP)
+        ip_frame = tk.Frame(self.ctrl, bg="#1a1a1a")
+        ip_frame.pack(fill="x", pady=5)
+        tk.Entry(ip_frame, textvariable=self.ip_var, width=20).pack(side="left", padx=5)
+        tk.Button(ip_frame, text="🔍 DISCOVER", command=self.discover_device, bg="#2c3e50", fg="white").pack(side="left")
 
-    def check_connection_flash(self):
-        """Trimite un semnal de test: toți pereții se aprind ALB timp de 1 secundă"""
-        print(f">>> Trimitere test către {TARGET_IP}:{PORT_SEND}...")
-        for w in range(1, 5):
-            for l in range(0, 11): self.hw.set_element(w, l, (255, 255, 255))
-        
-        # Verificăm dacă primim ceva de la senzori
-        if any(self.hw.eye_states.values()) or any(any(w) for w in self.hw.button_states.values()):
-            messagebox.showinfo("Conexiune", "Hardware-ul răspunde! Senzorii sunt activi.")
-        
-        self.ctrl.after(1000, self._all_off)
+        self.lbl_status = tk.Label(self.ctrl, text="Status: Ready", fg="gray", bg="#1a1a1a")
+        self.lbl_status.pack(pady=5)
 
+        ttk.Separator(self.ctrl, orient='horizontal').pack(fill='x', pady=15)
+
+        # 3. CONTROL JOC
+        tk.Label(self.ctrl, text="3. PORNEȘTE JOCUL", fg="white", bg="#1a1a1a", font=("Arial", 9, "bold")).pack(anchor="w")
+        self.btn_start = tk.Button(self.ctrl, text="▶ START MUSICAL CHAIRS", bg="#27ae60", fg="white", font=("Arial", 11, "bold"), 
+                                   command=self.operator_action_safe, height=2, state="disabled")
+        self.btn_start.pack(fill="x", pady=10)
+
+    def refresh_interfaces(self):
+        """Folosește logica din Team_collect pentru a găsi IP-urile locale"""
+        import psutil
+        ifaces = []
+        for name, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
+                    ifaces.append((name, addr.address, "255.255.255.255")) # Simplificat broadcast
+        
+        self.iface_list = ifaces
+        self.iface_combo['values'] = [f"{n} ({a})" for n, a, b in ifaces]
+        if ifaces: self.iface_combo.current(0)
+
+    def discover_device(self):
+        """Logica de Discovery care îți confirmă conexiunea"""
+        idx = self.iface_combo.current()
+        if idx < 0: return
+        name, ip, bcast = self.iface_list[idx]
+        
+        self.lbl_status.config(text="Scanning network...", fg="orange")
+        self.ctrl.update()
+        
+        from eye_io import run_discovery
+        found_ip = run_discovery(ip, bcast)
+        
+        if found_ip:
+            self.ip_var.set(found_ip)
+            self.lbl_status.config(text=f"✅ CONNECTED TO {found_ip}", fg="#2ecc71")
+            self.btn_start.config(state="normal")
+            # Actualizăm IP-ul global pentru trimiterea de pachete
+            import config_eye
+            config_eye.TARGET_IP = found_ip
+        else:
+            self.lbl_status.config(text="❌ NO DEVICE FOUND. Check cable!", fg="#e74c3c")
+
+   
     def _all_off(self):
         for w in range(1, 5):
             for l in range(0, 11): self.hw.set_element(w, l, (0, 0, 0))
