@@ -6,7 +6,7 @@ import random
 import psutil
 from config_eye import *
 
-# Tabelul de parole pentru Checksum (WIKI)
+# ── Tabel Parolă Checksum ─────────────────────────────
 PASSWORD_ARRAY = [
     35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231,
     16, 220, 99, 61, 25, 203, 203, 155, 107, 30, 92, 144, 218, 194, 226, 88,
@@ -32,10 +32,8 @@ def calc_checksum(data):
 
 def build_command_packet(data_id, msg_loc, payload, seq):
     internal = bytes([
-        0x02, 0x00, 0x00,
-        (data_id >> 8) & 0xFF, data_id & 0xFF,
-        (msg_loc >> 8) & 0xFF, msg_loc & 0xFF,
-        (len(payload) >> 8) & 0xFF, len(payload) & 0xFF,
+        0x02, 0x00, 0x00, (data_id >> 8) & 0xFF, data_id & 0xFF,
+        (msg_loc >> 8) & 0xFF, msg_loc & 0xFF, (len(payload) >> 8) & 0xFF, len(payload) & 0xFF,
     ]) + payload
     hdr = bytes([0x75, random.randint(0, 127), random.randint(0, 127), (len(internal) >> 8) & 0xFF, len(internal) & 0xFF])
     pkt = bytearray(hdr + internal)
@@ -55,145 +53,116 @@ def build_end_packet(seq):
 
 def build_fff0_packet(seq):
     payload = bytearray()
-    for _ in range(4): payload += bytes([0x00, 0x0B]) # 11 LEDs (1 Ochi + 10 Butoane)
+    for _ in range(4): payload += bytes([0x00, 0x0B])
     return build_command_packet(0x8877, 0xFFF0, bytes(payload), seq)
 
-# --- FUNCTII HARDWARE DISCOVERY ---
+# ── Funcții Discovery rețea ──────────────────────────
 def get_local_interfaces():
     results = []
     try:
+        import ipaddress
         for iface, addrs in psutil.net_if_addrs().items():
             for addr in addrs:
                 if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
                     try:
-                        import ipaddress
                         net = ipaddress.IPv4Network(f"{addr.address}/{addr.netmask}", strict=False)
                         bcast = str(net.broadcast_address)
-                    except:
-                        bcast = "255.255.255.255"
+                    except: bcast = "255.255.255.255"
                     results.append((iface, addr.address, bcast))
     except: pass
     results.append(("Simulator Local", "127.0.0.1", "127.0.0.1"))
     return results
 
 def build_discovery_packet():
-    rand1, rand2 = random.randint(0, 127), random.randint(0, 127)
+    r1, r2 = random.randint(0, 127), random.randint(0, 127)
     payload = bytearray([0x0A, 0x02, *b"KX-HC04", 0x03, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x14])
-    pkt = bytearray([0x67, rand1, rand2, len(payload)]) + payload
+    pkt = bytearray([0x67, r1, r2, len(payload)]) + payload
     pkt.append(calc_checksum(pkt))
-    return pkt, rand1, rand2
+    return bytes(pkt), r1, r2
 
-def run_discovery_flow():
-    interfaces = get_local_interfaces()
-    if not interfaces:
-        return None, "0.0.0.0"
-    
-    print("\n" + "="*40)
-    print("--- LEDHACK - Network Selection ---")
-    print("Alege reteaua conectata la Evil Eye:")
-    for i, (iface, ip, bcast) in enumerate(interfaces):
-        print(f"[{i}] {iface} - {ip}")
-    print("="*40)
-    
-    try:
-        choice = int(input("\nSelecteaza numarul (0 pentru Simulator): "))
-        sel = interfaces[choice]
-    except:
-        sel = interfaces[0]
-        print("Alegere invalida. Folosim optiunea 0.")
-        
-    print(f"\nIncercam pe interfata {sel[0]} ({sel[1]})")
+def run_discovery(bind_ip: str, broadcast_ip: str, timeout: float = 3.0):
+    pkt, rand1, rand2 = build_discovery_packet()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    
-    try: sock.bind((sel[1] if sel[1] != "127.0.0.1" else "0.0.0.0", 7800))
-    except: pass
-    
-    pkt, r1, r2 = build_discovery_packet()
-    try: sock.sendto(pkt, (sel[2], 4626)) 
-    except Exception as e: 
-        return None, sel[1]
-        
-    print("Cautam peretii in retea... Asteapta.")
     sock.settimeout(0.5)
-    end_time = time.time() + 3
-    devices = []
-    
-    while time.time() < end_time:
+
+    try: sock.bind((bind_ip if bind_ip != "127.0.0.1" else "0.0.0.0", 7800))
+    except:
+        try: sock.bind(("0.0.0.0", 7800))
+        except: return None
+
+    try: sock.sendto(pkt, (broadcast_ip, 4626))
+    except: return None
+
+    found = None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
         try:
             data, addr = sock.recvfrom(1024)
-            if len(data) >= 30 and data[0] == 0x68 and data[1] == r1 and data[2] == r2:
-                if addr[0] not in [d['ip'] for d in devices]:
-                    model = data[6:13].decode(errors='ignore').strip('\x00')
-                    devices.append({'ip': addr[0], 'model': model})
-                    print(f" > GASIT: {model} la IP-ul {addr[0]}")
-        except socket.timeout: continue
+            if len(data) >= 30 and data[0] == 0x68 and data[1] == rand1 and data[2] == rand2:
+                found = addr[0]
+                break
         except: pass
-        
+
     sock.close()
-    
-    if devices:
-        return devices[0]['ip'], sel[1]
-        
-    return None, sel[1]
+    return found
 
-# ---------------------------------------------
-
+# ── Clasa Hardware Complet Independentă ───────────────────
 class EvilEyeHardware:
     def __init__(self):
-        discovered_ip, selected_iface_ip = run_discovery_flow()
+        self.running = False
+        self.eye_states = {w: False for w in range(1, 5)}
+        self.button_states = {w: {l: False for l in range(11)} for w in range(1, 5)}
+        self._led_states = {}
+        self._seq = 0
+
+    def connect(self, target_ip: str, is_physical: bool):
+        self.target_ip = target_ip
+        self.is_physical = is_physical
         
-        # LOGICA INTELIGENTĂ DE SCHIMBARE A PORTURILOR:
-        if discovered_ip:
-            # S-A GĂSIT HARDWARE FIZIC
-            self.target_ip = discovered_ip
-            self.bind_ip = selected_iface_ip
-            self.active_send_port = 4626
-            self.active_recv_port = 7800
-            print(f"\n[MOD FIZIC ACTIV] OUT: {self.active_send_port} | IN: {self.active_recv_port}")
+        # DEFINIM PORTURILE CORECT (Asta stricase Controller.py!)
+        if self.is_physical:
+            self.send_port = 4626
+            self.recv_port = 7800
         else:
-            # SE FOLOSEȘTE SIMULATORUL (Din config_eye.py)
-            self.target_ip = TARGET_IP
-            self.bind_ip = "0.0.0.0"
-            self.active_send_port = PORT_SEND # 5003
-            self.active_recv_port = PORT_RECV # 5002
-            print(f"\n[MOD SIMULATOR ACTIV] OUT: {self.active_send_port} | IN: {self.active_recv_port}")
-        
+            self.send_port = PORT_SEND # Setat în config_eye.py
+            self.recv_port = PORT_RECV # Setat în config_eye.py
+            
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        try: self.sock_send.bind((self.bind_ip, 0))
-        except: pass
         
-        self.button_states = {w: [False]*11 for w in range(1, 5)} 
-        self.eye_states = {w: False for w in range(1, 5)} 
-        
-        self._led_states = {} 
-        self._seq = 0
         self.running = True
-        
         threading.Thread(target=self.input_listener, daemon=True).start()
         threading.Thread(target=self.output_streamer, daemon=True).start()
 
-    def set_element(self, wall, element_id, color):
-        self._led_states[(wall, element_id)] = color
+    def disconnect(self):
+        self.running = False
+
+    def set_element(self, wall: int, led: int, color: tuple):
+        self._led_states[(wall, led)] = color
 
     def output_streamer(self):
         while self.running:
             self._seq = (self._seq + 1) & 0xFFFF
-            frame = bytearray(132) 
+            frame = bytearray(132)
             for (ch, led), (r, g, b) in self._led_states.items():
                 ch_idx = ch - 1
                 if 0 <= ch_idx < 4 and 0 <= led < 11:
-                    # CUM TREBUIE SĂ FIE PENTRU HARDWARE-UL VOSTRU:
-                    frame[led * 12 + ch_idx] = r
-                    frame[led * 12 + 4 + ch_idx] = g
+                    if self.is_physical:
+                        # PENTRU FIZIC: Aplicăm corecția GRB (Inversăm Roșu cu Verde)
+                        frame[led * 12 + ch_idx] = g
+                        frame[led * 12 + 4 + ch_idx] = r
+                    else:
+                        # PENTRU SIMULATOR: Rămâne normal RGB
+                        frame[led * 12 + ch_idx] = r
+                        frame[led * 12 + 4 + ch_idx] = g
+                        
                     frame[led * 12 + 8 + ch_idx] = b
 
-            # Folosim active_send_port!
-            ep = (self.target_ip, self.active_send_port)
+            ep = (self.target_ip, self.send_port)
             try:
                 self.sock_send.sendto(build_start_packet(self._seq), ep)
-                time.sleep(0.008) 
+                time.sleep(0.008)
                 self.sock_send.sendto(build_fff0_packet(self._seq), ep)
                 time.sleep(0.008)
                 self.sock_send.sendto(build_command_packet(0x8877, 0x0000, bytes(frame), self._seq), ep)
@@ -201,14 +170,12 @@ class EvilEyeHardware:
                 self.sock_send.sendto(build_end_packet(self._seq), ep)
             except: pass
             
-            time.sleep(0.06) 
+            time.sleep(0.06)
 
     def input_listener(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
-        # Ascultăm pe active_recv_port!
-        try: sock.bind(("0.0.0.0", self.active_recv_port)) 
+        try: sock.bind(("0.0.0.0", self.recv_port))
         except: return
         
         while self.running:
@@ -219,8 +186,6 @@ class EvilEyeHardware:
                         base = 2 + (ch - 1) * 171
                         for led in range(11):
                             is_pressed = (data[base + 1 + led] == 0xCC)
-                            if led == 0:
-                                self.eye_states[ch] = is_pressed 
-                            else:
-                                self.button_states[ch][led] = is_pressed 
+                            if led == 0: self.eye_states[ch] = is_pressed
+                            else: self.button_states[ch][led] = is_pressed
             except: pass
