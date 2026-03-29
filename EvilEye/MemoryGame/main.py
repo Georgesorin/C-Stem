@@ -69,13 +69,18 @@ def run_discovery_flow():
     return None
 
 def get_local_interfaces():
-    interfaces = []
-    for iface, addrs in psutil.net_if_addrs().items():
-        for addr in addrs:
-            if addr.family == socket.AF_INET and not addr.address.startswith("127."):
-                # Calculăm o adresă de broadcast grosieră (sau folosim 255.255.255.255)
-                bcast = "255.255.255.255"
-                interfaces.append((iface, addr.address, bcast))
+    import socket, psutil
+    interfaces = [("Loopback", "127.0.0.1", "127.0.0.1")]
+    try:
+        for iface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    ip = addr.address
+                    if not ip.startswith("127."):
+                        # Calculăm broadcast-ul clasei C
+                        bcast = ".".join(ip.split('.')[:-1]) + ".255"
+                        interfaces.append((iface, ip, bcast))
+    except: pass
     return interfaces
 
 def calc_sum(data):
@@ -84,43 +89,68 @@ def calc_sum(data):
 class MasterLauncher:
     def __init__(self, root):
         self.root = root
-        self.root.title("Evil Eye Controller")
-        self.root.geometry("400x750")
+        self.root.title("Neon Memory Controller")
+        self.root.geometry("450x850") 
         self.root.configure(bg="#0b0b10")
+        
+        # Detectăm interfețele CHIAR AICI
+        self.available_interfaces = get_local_interfaces()
         
         self.game_running = False
         self.stop_timer_event = threading.Event()
 
+        # Networking
         self.network = LightService()
         self.network.start_receiver()
         self.network.start_polling()
 
+        # Audio
+        self.audio_ok = False
+        try:
+            pygame.mixer.init()
+            self.audio_ok = True
+        except: pass
+        self._load_all_sounds()
+
+        # Simulator
         self.sim_window = tk.Toplevel(self.root)
         self.simulator = EvilEyeSimulator(self.sim_window)
 
-        self.ui = ControlPanel(self.root, self.start_game, self.stop_game, self.resume_game, self.end_game)
+        # UI - Trimitem lista de interfețe ca argument nou
+        self.ui = ControlPanel(
+            self.root, 
+            self.network, 
+            self.available_interfaces, # <--- Pasăm lista aici
+            self.start_game, 
+            self.stop_game, 
+            self.resume_game, 
+            self.end_game
+        )
+        
         self.network.on_button_state = self._hardware_input_handler
 
-        self.audio_ok = False
-        try:
-            pygame.mixer.pre_init(44100, -16, 2, 512)
-            pygame.mixer.init()
-            self.audio_ok = True
-            print("🔊 Sistem audio inițializat.")
-        except Exception as e:
-            print(f"⚠️ Atenție: Mixerul audio nu a putut fi pornit ({e}).")
-
+    def _load_all_sounds(self):
+        """Încarcă fișierele audio doar dacă există pe disc."""
         self.snd_press = self.snd_fail = self.snd_hint = self.snd_win = self.snd_your_turn = None
+        
+        if not self.audio_ok: return
 
-        if self.audio_ok:
-            try:
-                self.snd_press = pygame.mixer.Sound("game_logic/_sfx/press_ok.wav")
-                self.snd_fail = pygame.mixer.Sound("game_logic/_sfx/fail.wav")
-                self.snd_hint = pygame.mixer.Sound("game_logic/_sfx/hint.wav")
-                self.snd_win = pygame.mixer.Sound("game_logic/_sfx/victory.wav")
-                self.snd_your_turn = pygame.mixer.Sound("game_logic/_sfx/15_sec_count.wav")
-            except Exception as e:
-                print(f"❌ Eroare la încărcarea fișierelor SFX: {e}")
+        sfx_map = {
+            "press": "game_logic/_sfx/press_ok.wav",
+            "fail": "game_logic/_sfx/fail.wav",
+            "hint": "game_logic/_sfx/hint.wav",
+            "win": "game_logic/_sfx/victory.wav",
+            "your_turn": "game_logic/_sfx/15_sec_count.wav"
+        }
+
+        for attr, path in sfx_map.items():
+            if os.path.exists(path):
+                try:
+                    setattr(self, f"snd_{attr}", pygame.mixer.Sound(path))
+                except:
+                    print(f"⚠️ Corrupt file: {path}")
+            else:
+                print(f"❌ Missing file: {path}")
 
 
     def _hardware_input_handler(self, ch, led, is_trig, is_disc):
@@ -214,6 +244,7 @@ class MasterLauncher:
         self.ui.show_setup()
 
     def start_game(self):
+        print("🚀 Incepem jocul...") # Pune acest print ca să vezi dacă ajunge aici
         players = self.ui.players_var.get()
         self.game = MemoryGame(num_players=players)
         self.game_running = True
@@ -221,7 +252,8 @@ class MasterLauncher:
 
     def run_next_round(self):
         if self.game_running:
-            threading.Thread(target=self._play_sequence_thread, daemon=True).start()
+            print("DEBUG: Pornim secvența următoare...")
+        threading.Thread(target=self._play_sequence_thread, daemon=True).start()
 
     def _round_timer_thread(self):
         start_time = time.time()
@@ -271,16 +303,7 @@ class MasterLauncher:
         self.root.destroy()
 
 if __name__ == "__main__":
-    discovered_ip = run_discovery_flow()
-    
     root = tk.Tk()
+    # Nu mai apelăm run_discovery_flow() aici
     app = MasterLauncher(root)
-    
-    if discovered_ip:
-        print(f"📡 Conectare la dispozitiv real: {discovered_ip}")
-        app.network.set_device(discovered_ip)
-    else:
-        print("🖥️ Rămânem pe simulator local (127.0.0.1)")
-        app.network.set_device("127.0.0.1")
-        
     root.mainloop()

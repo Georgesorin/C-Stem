@@ -44,7 +44,7 @@ class Player:
             self.x = new_x
 
 class Ball:
-    def __init__(self, base_speed=0.5, acceleration=1.05):
+    def __init__(self, base_speed=0.5, acceleration=0.05):
         self.base_speed = base_speed
         self.acceleration = acceleration
         self.reset()
@@ -119,9 +119,9 @@ class PongGame:
             oy = random.randint(10, 20)
             self.obstacles.append(Obstacle(ox, oy))
         configs = {
-            "Easy":   {"speed": 0.2, "accel": 1.01},
-            "Normal": {"speed": 0.3, "accel": 1.02},
-            "Hard":   {"speed": 0.5, "accel": 1.3}
+            "Easy":   {"speed": 0.1, "accel": 0.5},
+            "Normal": {"speed": 0.2, "accel": 0.75},
+            "Hard":   {"speed": 0.3, "accel": 0.75}
         }
         cfg = configs.get(level, configs["Normal"])
         self.total_rounds = total_rounds
@@ -314,11 +314,11 @@ class PongGame:
             return status
         
     def check_match_winner(self):
-        """Decide dacă meciul s-a terminat sau doar runda."""
         needed_to_win = (self.total_rounds // 2) + 1
         
         if self.rounds_won_p1 >= needed_to_win:
             return "WINNER_P1"
+        
         if self.rounds_won_p2 >= needed_to_win:
             return "WINNER_P2"
         
