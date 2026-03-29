@@ -58,18 +58,23 @@ def build_fff0_packet(seq):
     for _ in range(4): payload += bytes([0x00, 0x0B]) # 11 LEDs (1 Ochi + 10 Butoane)
     return build_command_packet(0x8877, 0xFFF0, bytes(payload), seq)
 
-# --- FUNCTII NOI PENTRU HARDWARE DISCOVERY ---
+# --- FUNCTII HARDWARE DISCOVERY ---
 def get_local_interfaces():
-    interfaces = []
+    results = []
     try:
         for iface, addrs in psutil.net_if_addrs().items():
             for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    bcast = addr.broadcast if addr.broadcast else "255.255.255.255"
-                    interfaces.append((iface, addr.address, bcast))
-    except:
-        interfaces.append(("Default", "0.0.0.0", "255.255.255.255"))
-    return interfaces
+                if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
+                    try:
+                        import ipaddress
+                        net = ipaddress.IPv4Network(f"{addr.address}/{addr.netmask}", strict=False)
+                        bcast = str(net.broadcast_address)
+                    except:
+                        bcast = "255.255.255.255"
+                    results.append((iface, addr.address, bcast))
+    except: pass
+    results.append(("Simulator Local", "127.0.0.1", "127.0.0.1"))
+    return results
 
 def build_discovery_packet():
     rand1, rand2 = random.randint(0, 127), random.randint(0, 127)
@@ -81,7 +86,6 @@ def build_discovery_packet():
 def run_discovery_flow():
     interfaces = get_local_interfaces()
     if not interfaces:
-        print("No active network interfaces found.")
         return None, "0.0.0.0"
     
     print("\n" + "="*40)
@@ -92,23 +96,22 @@ def run_discovery_flow():
     print("="*40)
     
     try:
-        choice = int(input("\nSelecteaza numarul: "))
+        choice = int(input("\nSelecteaza numarul (0 pentru Simulator): "))
         sel = interfaces[choice]
     except:
         sel = interfaces[0]
-        print("Alegere invalida. Folosim default 0.")
+        print("Alegere invalida. Folosim optiunea 0.")
         
     print(f"\nIncercam pe interfata {sel[0]} ({sel[1]})")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     
-    try: sock.bind((sel[1], 7800)) # Bind pe portul cerut de protocol
+    try: sock.bind((sel[1] if sel[1] != "127.0.0.1" else "0.0.0.0", 7800))
     except: pass
     
     pkt, r1, r2 = build_discovery_packet()
-    try: sock.sendto(pkt, (sel[2], 4626)) # Trimitem broadcast
+    try: sock.sendto(pkt, (sel[2], 4626)) 
     except Exception as e: 
-        print("Eroare la trimitere broadcast.")
         return None, sel[1]
         
     print("Cautam peretii in retea... Asteapta.")
@@ -130,51 +133,54 @@ def run_discovery_flow():
     sock.close()
     
     if devices:
-        target = devices[0]['ip']
-        print(f"Setat! Trimitem culorile catre {target}\n")
-        return target, sel[1]
+        return devices[0]['ip'], sel[1]
         
-    print("Nu am gasit nimic, folosim setarile din fisierul de config (Simulator).\n")
     return None, sel[1]
 
 # ---------------------------------------------
 
 class EvilEyeHardware:
     def __init__(self):
-        # 1. Rulăm scanarea rețelei
         discovered_ip, selected_iface_ip = run_discovery_flow()
         
-        # 2. Salvăm IP-urile (Dacă a găsit hardware, folosește IP-ul lui. Dacă nu, TARGET_IP din config pt Simulator)
-        self.target_ip = discovered_ip if discovered_ip else TARGET_IP
-        self.bind_ip = selected_iface_ip
+        # LOGICA INTELIGENTĂ DE SCHIMBARE A PORTURILOR:
+        if discovered_ip:
+            # S-A GĂSIT HARDWARE FIZIC
+            self.target_ip = discovered_ip
+            self.bind_ip = selected_iface_ip
+            self.active_send_port = 4626
+            self.active_recv_port = 7800
+            print(f"\n[MOD FIZIC ACTIV] OUT: {self.active_send_port} | IN: {self.active_recv_port}")
+        else:
+            # SE FOLOSEȘTE SIMULATORUL (Din config_eye.py)
+            self.target_ip = TARGET_IP
+            self.bind_ip = "0.0.0.0"
+            self.active_send_port = PORT_SEND # 5003
+            self.active_recv_port = PORT_RECV # 5002
+            print(f"\n[MOD SIMULATOR ACTIV] OUT: {self.active_send_port} | IN: {self.active_recv_port}")
         
-        # 3. Deschidem socket-ul pt trimitere fix pe interfața de cablu aleasă!
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         try: self.sock_send.bind((self.bind_ip, 0))
         except: pass
         
-        # Structuri logice (1-4 pentru pereți)
         self.button_states = {w: [False]*11 for w in range(1, 5)} 
         self.eye_states = {w: False for w in range(1, 5)} 
         
-        self._led_states = {} # (perete, led_id) -> (r,g,b)
+        self._led_states = {} 
         self._seq = 0
         self.running = True
         
-        # Pornim firele de execuție
         threading.Thread(target=self.input_listener, daemon=True).start()
         threading.Thread(target=self.output_streamer, daemon=True).start()
 
     def set_element(self, wall, element_id, color):
-        """ wall: 1-4, element_id: 0(ochi) sau 1-10(butoane) """
         self._led_states[(wall, element_id)] = color
 
     def output_streamer(self):
-        """Trimite continuu secvența de 4 pachete către hardware / simulator"""
         while self.running:
             self._seq = (self._seq + 1) & 0xFFFF
-            frame = bytearray(132) # 4 pereți * 11 leds * 3 bytes
+            frame = bytearray(132) 
             for (ch, led), (r, g, b) in self._led_states.items():
                 ch_idx = ch - 1
                 if 0 <= ch_idx < 4 and 0 <= led < 11:
@@ -182,11 +188,11 @@ class EvilEyeHardware:
                     frame[led * 12 + 4 + ch_idx] = r
                     frame[led * 12 + 8 + ch_idx] = b
 
-            # Folosim self.target_ip (gasit de discovery)
-            ep = (self.target_ip, PORT_SEND)
+            # Folosim active_send_port!
+            ep = (self.target_ip, self.active_send_port)
             try:
                 self.sock_send.sendto(build_start_packet(self._seq), ep)
-                time.sleep(0.008) # 8ms delay obligatoriu
+                time.sleep(0.008) 
                 self.sock_send.sendto(build_fff0_packet(self._seq), ep)
                 time.sleep(0.008)
                 self.sock_send.sendto(build_command_packet(0x8877, 0x0000, bytes(frame), self._seq), ep)
@@ -194,15 +200,14 @@ class EvilEyeHardware:
                 self.sock_send.sendto(build_end_packet(self._seq), ep)
             except: pass
             
-            time.sleep(0.06) # Refresh rate general
+            time.sleep(0.06) 
 
     def input_listener(self):
-        """Ascultă pachetul complex de 687 bytes de la Evil Eye"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
-        # E mai sigur "0.0.0.0" la citire ca să prindă tot de pe toate porturile
-        try: sock.bind(("0.0.0.0", PORT_RECV)) 
+        # Ascultăm pe active_recv_port!
+        try: sock.bind(("0.0.0.0", self.active_recv_port)) 
         except: return
         
         while self.running:
@@ -214,7 +219,7 @@ class EvilEyeHardware:
                         for led in range(11):
                             is_pressed = (data[base + 1 + led] == 0xCC)
                             if led == 0:
-                                self.eye_states[ch] = is_pressed # Index 0 e ochiul
+                                self.eye_states[ch] = is_pressed 
                             else:
-                                self.button_states[ch][led] = is_pressed # Index 1-10 sunt butoanele
+                                self.button_states[ch][led] = is_pressed 
             except: pass
