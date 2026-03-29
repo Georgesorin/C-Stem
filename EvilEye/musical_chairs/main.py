@@ -10,21 +10,18 @@ from dataclasses import dataclass, field
 from typing import List, Tuple
 
 # ==============================================================================
-# --- Configurații Globale (Înlocuiesc config_eye.py) ---
+# --- Configurații Globale ---
 # ==============================================================================
-PORT_SEND = 4626 # Portul de control lumini (Simulator IN)
-PORT_RECV = 7800 # Portul de recepție butoane (Simulator OUT)
+PORT_SEND = 4626 
+PORT_RECV = 7800 
 
 COLORS = {
-    "EYE_OPEN": (255, 0, 0),    # Roșu (Ochi deschis)
-    "EYE_CLOSED": (0, 40, 0),   # Verde stins (Ochi închis)
-    "POINT": (0, 255, 255),     # Cyan (Punct bonus)
+    "EYE_OPEN": (255, 0, 0),    
+    "EYE_CLOSED": (0, 40, 0),   
+    "POINT": (0, 255, 255),     
     "OFF": (0, 0, 0)
 }
 
-# ==============================================================================
-# --- Logica de Rețea (Conform snippet-ului tău) ---
-# ==============================================================================
 PASSWORD_ARRAY = [
     35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231,
     16, 220, 99, 61, 25, 203, 203, 155, 107, 30, 92, 144, 218, 194, 226, 88,
@@ -48,18 +45,8 @@ def calc_checksum(data):
     idx = sum(data) & 0xFF
     return PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0
 
-def build_fff0_packet(seq):
-    payload = bytearray()
-    for _ in range(4): payload += bytes([0x00, 0x0B])
-    internal = bytes([0x02, 0, 0, 0x88, 0x77, 0xFF, 0xF0, 0, len(payload)]) + payload
-    hdr = bytes([0x75, 0, 0, (len(internal)>>8)&0xFF, len(internal)&0xFF])
-    pkt = bytearray(hdr + internal)
-    pkt[10], pkt[11] = (seq >> 8) & 0xFF, seq & 0xFF
-    pkt.append(calc_checksum(pkt))
-    return bytes(pkt)
-
 # ==============================================================================
-# --- Management Hardware (Conform snippet-ului tău) ---
+# --- Clasa Hardware (Protocol v11 Intercalat) ---
 # ==============================================================================
 class EvilEyeHardware:
     def __init__(self):
@@ -70,9 +57,7 @@ class EvilEyeHardware:
         self._seq = 0
 
     def connect(self, target_ip, is_physical):
-        self.target_ip, self.is_physical = target_ip, is_physical
-        self.send_port = PORT_SEND
-        self.recv_port = PORT_RECV
+        self.target_ip = target_ip
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.running = True
@@ -85,30 +70,28 @@ class EvilEyeHardware:
     def output_streamer(self):
         while self.running:
             self._seq = (self._seq + 1) & 0xFFFF
-            frame = bytearray(132) # 4 walls * 11 leds * 3 colors
+            frame = bytearray(132) 
             for (ch, led), (r, g, b) in self._led_states.items():
                 ch_idx = ch - 1
                 if 0 <= ch_idx < 4 and 0 <= led < 11:
-                    # Logica de intercalare a culorilor conform simulatorului
                     frame[led * 12 + ch_idx] = r
                     frame[led * 12 + 4 + ch_idx] = g
                     frame[led * 12 + 8 + ch_idx] = b
 
-            ep = (self.target_ip, self.send_port)
             try:
-                # Trimitere pachet date simplificat pt simulator
-                internal = bytes([0x02, 0, 0, 0x88, 0x77, 0, 1, 0, len(frame)]) + frame
-                hdr = bytes([0x75, 0, 0, (len(internal)>>8)&0xFF, len(internal)&0xFF])
-                pkt = bytearray(hdr + internal)
+                # Payload date
+                pld = bytearray([0x02, 0, 0, 0x88, 0x77, 0, 1, 0, len(frame)]) + frame
+                hdr = bytearray([0x75, 0, 0, (len(pld)>>8)&0xFF, len(pld)&0xFF])
+                pkt = hdr + pld
                 pkt.append(calc_checksum(pkt))
-                self.sock_send.sendto(pkt, ep)
+                self.sock_send.sendto(pkt, (self.target_ip, PORT_SEND))
             except: pass
-            time.sleep(0.06)
+            time.sleep(0.05)
 
     def input_listener(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try: sock.bind(("0.0.0.0", self.recv_port))
+        try: sock.bind(("0.0.0.0", PORT_RECV))
         except: return
         while self.running:
             try:
@@ -117,66 +100,71 @@ class EvilEyeHardware:
                     for ch in range(1, 5):
                         base = 2 + (ch - 1) * 171
                         for led in range(11):
-                            is_pressed = (data[base + 1 + led] == 0xCC)
-                            if led == 0: self.eye_states[ch] = is_pressed
-                            else: self.button_states[ch][led] = is_pressed
+                            val = data[base + 1 + led]
+                            if led == 0: self.eye_states[ch] = (val == 0xCC)
+                            else: self.button_states[ch][led] = (val == 0xCC)
             except: pass
 
 # ==============================================================================
-# --- Logica Jocului Evil Eye (Clasa Operator) ---
+# --- Logica Operator (Joc & UI) ---
 # ==============================================================================
 class EvilEyeOperator:
     def __init__(self):
-        self.hw = EvilEyeHardware()
+        # 1. Inițializare atribute (FIX PENTRU ERORILE DIN IMAGINE)
         self.running = True
+        self.hw = EvilEyeHardware()
         self.score = 0
         self.lives = 5
-        self.game_phase = "IDLE" # IDLE, SAFE, WATCHING
+        self.game_phase = "IDLE"
         self.hit_cooldown = 0
-        
-        self.bonus_points = [] # Lista de (wall, led, color, fade)
-        self.loss_sound_played = False
+        self.bonus_points = []
+        self.music_file = None
         self.music_process = None
+        self.loss_sound_played = False
 
-        self.setup_gui()
-        threading.Thread(target=self.game_loop, daemon=True).start()
-
-    def setup_gui(self):
+        # 2. Configurare Interfață
         self.root = tk.Tk()
-        self.root.title("STAFF CONTROL - EVIL EYE")
+        self.root.title("EVIL EYE STAFF CONTROL")
         self.root.geometry("450x550")
         
-        # Fereastra Scoreboard
         self.view = tk.Toplevel(self.root)
         self.view.title("SCOREBOARD")
-        self.view.geometry("800x600")
+        self.view.geometry("800x600+500+100")
         self.view.configure(bg="black")
 
         self.setup_staff_ui()
         self.setup_view_ui()
 
+        # 3. Pornire buclă logică
+        threading.Thread(target=self.game_loop, daemon=True).start()
+
     def setup_staff_ui(self):
-        tk.Label(self.root, text="👁️ EVIL EYE CONTROL", font=("Arial", 16, "bold")).pack(pady=20)
+        tk.Label(self.root, text="👁️ OPERATOR CONTROL", font=("Arial", 14, "bold")).pack(pady=15)
         self._ip_var = tk.StringVar(value="127.0.0.1")
-        tk.Entry(self.root, textvariable=self._ip_var).pack()
-        tk.Button(self.root, text="🔗 CONNECT TO SIMULATOR", command=self._connect).pack(pady=5)
+        tk.Entry(self.root, textvariable=self._ip_var, width=20).pack()
+        tk.Button(self.root, text="🔗 CONNECT", command=self._connect, bg="#34495e", fg="white").pack(pady=5)
         
         self.lbl_status = tk.Label(self.root, text="Status: Deconectat", fg="gray")
         self.lbl_status.pack()
 
-        tk.Button(self.root, text="📁 Alege Muzica", command=self._sel_music).pack(pady=10)
-        self.lbl_song = tk.Label(self.root, text="Nicio piesă", fg="blue"); self.lbl_song.pack()
+        tk.Separator(self.root).pack(fill="x", pady=10)
+        
+        tk.Button(self.root, text="📁 Încarcă Muzica", command=self._sel_music).pack()
+        self.lbl_song = tk.Label(self.root, text="Niciun fișier", fg="blue"); self.lbl_song.pack(pady=5)
 
-        self.btn_play = tk.Button(self.root, text="▶️ PLAY (Safe)", bg="green", command=self._action_safe, state="disabled", height=2, width=20)
+        self.btn_play = tk.Button(self.root, text="▶️ START (Ochi ÎNCHIS)", bg="#27ae60", fg="white", 
+                                  command=self._action_safe, state="disabled", height=2, width=25)
         self.btn_play.pack(pady=5)
-        self.btn_stop = tk.Button(self.root, text="⏸️ STOP (Watching)", bg="red", command=self._action_watching, state="disabled", height=2, width=20)
+        
+        self.btn_stop = tk.Button(self.root, text="⏸️ PAUSE (Ochi DESCHIS)", bg="#c0392b", fg="white", 
+                                  command=self._action_watching, state="disabled", height=2, width=25)
         self.btn_stop.pack(pady=5)
 
     def setup_view_ui(self):
-        tk.Label(self.view, text="EVIL EYE", font=("Impact", 80), bg="black", fg="red").pack(pady=30)
+        tk.Label(self.view, text="EVIL EYE", font=("Impact", 80), bg="black", fg="#ff3333").pack(pady=30)
         self.lbl_score_v = tk.Label(self.view, text="SCOR: 0", font=("Arial", 60), bg="black", fg="white"); self.lbl_score_v.pack()
         self.lbl_lives_v = tk.Label(self.view, text="VIEȚI: 5", font=("Arial", 60), bg="black", fg="#ff4444"); self.lbl_lives_v.pack()
-        self.lbl_msg_v = tk.Label(self.view, text="STANDBY", font=("Arial", 40), bg="black", fg="gray"); self.lbl_msg_v.pack(pady=40)
+        self.lbl_msg_v = tk.Label(self.view, text="AȘTEPTARE...", font=("Arial", 40), bg="black", fg="#555555"); self.lbl_msg_v.pack(pady=40)
 
     def _connect(self):
         self.hw.connect(self._ip_var.get(), is_physical=False)
@@ -185,16 +173,18 @@ class EvilEyeOperator:
         self.btn_stop.config(state="normal")
 
     def _sel_music(self):
-        f = filedialog.askopenfilename()
-        if f: self.music_file = f; self.lbl_song.config(text=os.path.basename(f))
+        f = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.wav *.ogg")])
+        if f: 
+            self.music_file = f
+            self.lbl_song.config(text=os.path.basename(f))
 
     def _action_safe(self):
         self.game_phase = "SAFE"
-        if hasattr(self, 'music_file'):
+        if self.music_file:
             if self.music_process: self.music_process.terminate()
             self.music_process = subprocess.Popen(["afplay", self.music_file])
         if not self.bonus_points: 
-            for _ in range(10): self.spawn_point()
+            for _ in range(8): self.spawn_point()
 
     def _action_watching(self):
         self.game_phase = "WATCHING"
@@ -204,40 +194,39 @@ class EvilEyeOperator:
 
     def spawn_point(self):
         clrs = [(0,255,255), (255,0,255), (0,255,0), (255,255,0)]
-        w, l = random.randint(1, 4), random.randint(1, 10)
+        w = random.randint(1, 4)
+        l = random.randint(1, 10)
         self.bonus_points.append({'wall': w, 'led': l, 'color': random.choice(clrs), 'fade': 0.0})
 
     def game_loop(self):
         while self.running:
             now = time.time()
-            if self.game_phase != "IDLE":
-                # 1. Update Fade puncte
+            if self.game_phase in ["SAFE", "WATCHING"]:
                 for p in self.bonus_points: p['fade'] = min(1.0, p['fade'] + 0.1)
 
-                # 2. Verificare Colectare & Penalizare
                 penalty = False
                 for w in range(1, 5):
                     for l in range(1, 11):
                         if self.hw.button_states[w][l]:
-                            # Colectare în faza SAFE
+                            # Colectare
                             for p in self.bonus_points[:]:
                                 if p['wall'] == w and p['led'] == l:
                                     self.score += 100
                                     self.bonus_points.remove(p)
                                     self.spawn_point()
-                            # Penalizare în faza WATCHING
+                            # Penalizare (Watching)
                             if self.game_phase == "WATCHING" and now > self.hit_cooldown:
                                 penalty = True
 
                 if penalty:
                     self.lives -= 1
                     self.hit_cooldown = now + 1.5
-                    if self.lives <= 0: 
+                    if self.lives <= 0:
                         self.game_phase = "GAMEOVER"
                         self._play_loss()
 
             self._update_hardware()
-            self._update_ui()
+            self.root.after(0, self._update_ui)
             time.sleep(0.05)
 
     def _update_hardware(self):
@@ -247,10 +236,8 @@ class EvilEyeOperator:
             for l in range(1, 11): self.hw.set_element(w, l, (0,0,0))
         
         for p in self.bonus_points:
-            c = p['color']
-            f = p['fade']
-            final_c = (int(c[0]*f), int(c[1]*f), int(c[2]*f))
-            self.hw.set_element(p['wall'], p['led'], final_c)
+            c, f = p['color'], p['fade']
+            self.hw.set_element(p['wall'], p['led'], (int(c[0]*f), int(c[1]*f), int(c[2]*f)))
 
     def _update_ui(self):
         self.lbl_score_v.config(text=f"SCOR: {self.score}")
@@ -260,14 +247,15 @@ class EvilEyeOperator:
         elif self.game_phase == "GAMEOVER": self.lbl_msg_v.config(text="JOC TERMINAT!", fg="white")
 
     def _play_loss(self):
-        if not self.loss_sound_played:
+        if not self.loss_sound_played and self.music_file:
             self.loss_sound_played = True
             m_dir = os.path.dirname(self.music_file)
-            for f in os.listdir(m_dir):
-                if "sad trombone" in f.lower():
-                    subprocess.Popen(["afplay", os.path.join(m_dir, f)])
-                    break
+            try:
+                for f in os.listdir(m_dir):
+                    if "sad trombone" in f.lower():
+                        subprocess.Popen(["afplay", os.path.join(m_dir, f)])
+                        break
+            except: pass
 
 if __name__ == "__main__":
-    app = EvilEyeOperator()
-    app.root.mainloop()
+    EvilEyeOperator().root.mainloop()
