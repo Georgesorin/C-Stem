@@ -11,7 +11,6 @@ import random
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from Controller import LightService
-from Simulator import EvilEyeSimulator
 from display.outside_display import ControlPanel
 from game_logic.memory_game import MemoryGame
 
@@ -112,10 +111,6 @@ class MasterLauncher:
         except: pass
         self._load_all_sounds()
 
-        # Simulator
-        self.sim_window = tk.Toplevel(self.root)
-        self.simulator = EvilEyeSimulator(self.sim_window)
-
         # UI - Trimitem lista de interfețe ca argument nou
         self.ui = ControlPanel(
             self.root, 
@@ -208,6 +203,7 @@ class MasterLauncher:
         time.sleep(0.5)
         
         new_wall, new_led = self.game.add_next_step()
+        print(f"DEBUG: Aprindem Wall {new_wall}, LED {new_led}")
         
         self.network.set_led(new_wall, 0, 0, 242, 255)
         time.sleep(1.0)
@@ -244,7 +240,7 @@ class MasterLauncher:
         self.ui.show_setup()
 
     def start_game(self):
-        print("🚀 Incepem jocul...") # Pune acest print ca să vezi dacă ajunge aici
+        self.play_background_music() # <-- Muzica pornește când apeși START
         players = self.ui.players_var.get()
         self.game = MemoryGame(num_players=players)
         self.game_running = True
@@ -253,7 +249,7 @@ class MasterLauncher:
     def run_next_round(self):
         if self.game_running:
             print("DEBUG: Pornim secvența următoare...")
-        threading.Thread(target=self._play_sequence_thread, daemon=True).start()
+            threading.Thread(target=self._play_sequence_thread, daemon=True).start()
 
     def _round_timer_thread(self):
         start_time = time.time()
@@ -301,6 +297,16 @@ class MasterLauncher:
     def end_game(self):
         self.network.all_off()
         self.root.destroy()
+
+    def play_background_music(self):
+        path = "game_logic/_sfx/background.mp3" 
+        if os.path.exists(path) and self.audio_ok:
+            try:
+                pygame.mixer.music.load(path)
+                pygame.mixer.music.play(-1)
+                pygame.mixer.music.set_volume(0.5)
+            except Exception as e:
+                print(f"Eroare muzica: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
