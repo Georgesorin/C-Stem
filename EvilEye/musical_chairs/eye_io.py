@@ -171,8 +171,10 @@ class EvilEyeHardware:
             self._connected = False
 
     # ── LED control ───────────────────────────────────────────────────────────
+    # ── LED control ───────────────────────────────────────────────────────────
     def set_element(self, wall: int, led: int, color: tuple):
         """Send a single LED colour to the hardware."""
         if self._svc and self._connected:
             r, g, b = color
-            self._svc.set_led(wall, led, r, g, b)
+            # Trimitem (g, r, b) pentru a repara culorile inversate pe pereții fizici!
+            self._svc.set_led(wall, led, g, r, b)
