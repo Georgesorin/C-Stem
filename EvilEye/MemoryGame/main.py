@@ -3,6 +3,7 @@ import threading
 import sys
 import os
 import time
+import pygame
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,46 +33,96 @@ class MasterLauncher:
         self.ui = ControlPanel(self.root, self.start_game, self.stop_game, self.resume_game, self.end_game)
         self.network.on_button_state = self._hardware_input_handler
 
+        pygame.mixer.init()
+        
+        # Încarci sunetele în memorie (ca să nu existe lag)
+        self.snd_press = pygame.mixer.Sound("game_logic/_sfx/press_ok.wav")
+        self.snd_fail = pygame.mixer.Sound("game_logic/_sfx/fail.wav")
+        self.snd_hint = pygame.mixer.Sound("game_logic/_sfx/hint.wav")
+        self.snd_win = pygame.mixer.Sound("game_logic/_sfx/victory.wav")
+        self.snd_your_turn = pygame.mixer.Sound("game_logic/_sfx/15_sec_count.wav")
+        self.snd_fail = pygame.mixer.Sound("game_logic/_sfx/fail.wav")
+
     def _hardware_input_handler(self, ch, led, is_trig, is_disc):
         if is_trig and hasattr(self, 'game') and self.game:
+            # Verificăm starea direct aici pentru rapiditate
             if self.game.state == "WAITING":
                 self.root.after(0, lambda: self._process_press(ch, led))
 
     def _process_press(self, ch, led):
+        self.snd_fail.play()
+        # 1. Protecție: dacă între timp starea s-a schimbat, ieșim
+        if not hasattr(self, 'game') or self.game.state != "WAITING":
+            return
+
+        # 2. Oprim sunetul de turn și timer-ul imediat
+        if hasattr(self, 'current_turn_channel') and self.current_turn_channel:
+            self.current_turn_channel.stop()
         self.stop_timer_event.set() 
+
+        # 3. Verificăm apăsarea
         result = self.game.check_press(ch, led)
-        if result == "IGNORE": return
+        
+        if result == "IGNORE": 
+            return
 
         # Feedback corect: Verde pe buton
         if result in ["STEP_CORRECT", "LEVEL_COMPLETE", "ULTIMATE_WIN"]:
+            self.snd_press.play()
             self.network.set_led(ch, led, 0, 255, 0)
             self.root.after(300, lambda c=ch, l=led: self.network.set_led(c, l, 0, 0, 0))
 
         if result == "LEVEL_COMPLETE":
-            self.network.set_led(ch, 0, 0, 255, 0) # Ochi Verde scurt
+            # Folosește un sunet de succes aici, nu cel de fail!
+            # self.snd_press.play() sau un sunet nou de 'level_up'
+            self.network.set_led(ch, 0, 0, 255, 0) 
             self.ui.update_status(f"Step {len(self.game.sequence)}/10 Complete", "#00ff88")
             self.root.after(1000, self.run_next_round)
 
         elif result == "ULTIMATE_WIN":
+            self.snd_win.play()
             self.game_running = False
             for wall in range(1, 5): self.network.set_led(wall, 0, 0, 255, 0)
             self.ui.show_full_screen_message("MISSION COMPLETE\nYOU WIN", "#00ff88")
             self.root.after(5000, self._reset_to_lobby)
 
         elif result == "GAME_OVER":
+            self.snd_fail.play()
             self.game_running = False
-            
-            # 1. Colorăm butonul gresit în ROȘU fix
             self.network.set_led(ch, led, 255, 0, 0)
-            
-            # 2. Mesaj gigant pe ecran
             self.ui.show_full_screen_message("SYSTEM FAILURE\nYOU LOSE", "#ff2a6d")
-            
-            # 3. Pornim animația de "sclipocire" a ochilor pe un thread separat
             threading.Thread(target=self._alarm_strobe_thread, daemon=True).start()
-            
-            # 4. Reset după 4 secunde (timp în care ochii sclipesc)
             self.root.after(4000, self._reset_to_lobby)
+
+    def _play_sequence_thread(self):
+        self.game.state = "SHOWING"
+        self.network.all_off()
+        time.sleep(0.5)
+        
+        # Adăugăm pasul nou
+        new_wall, new_led = self.game.add_next_step()
+        
+        # ARĂTĂM DOAR ULTIMUL ELEMENT (HARD MODE)
+        # 1. Indicator Cyan pe Ochi
+        self.network.set_led(new_wall, 0, 0, 242, 255)
+        time.sleep(1.0)
+        self.network.set_led(new_wall, 0, 0, 0, 0)
+        time.sleep(0.2)
+
+        # 2. Arată butonul (Albastru)
+        self.network.set_led(new_wall, new_led, 0, 0, 255)
+        time.sleep(1.0)
+        self.network.set_led(new_wall, new_led, 0, 0, 0)
+        
+        # SETĂM STAREA PE WAITING ȘI ABIA APOI REDĂM SUNETUL
+        self.game.state = "WAITING"
+        self.current_turn_channel = self.snd_your_turn.play()
+        
+        self.root.after(0, lambda: self.ui.update_status("Your turn!"))
+
+        # Pornim timer-ul de 15 secunde
+        self.stop_timer_event.clear()
+        threading.Thread(target=self._round_timer_thread, daemon=True).start()
 
     def _alarm_strobe_thread(self):
         """Efect de stroboscop roșu pentru toți ochii."""
@@ -103,30 +154,6 @@ class MasterLauncher:
         if self.game_running:
             threading.Thread(target=self._play_sequence_thread, daemon=True).start()
 
-    def _play_sequence_thread(self):
-        self.game.state = "SHOWING"
-        self.network.all_off()
-        time.sleep(0.5)
-        
-        new_wall, new_led = self.game.add_next_step()
-        
-        # Indicator Cyan pe Ochi
-        self.network.set_led(new_wall, 0, 0, 242, 255)
-        time.sleep(1.0)
-        self.network.set_led(new_wall, 0, 0, 0, 0)
-        time.sleep(0.2)
-
-        # Arată noul buton (Albastru)
-        self.network.set_led(new_wall, new_led, 0, 0, 255)
-        time.sleep(1.0)
-        self.network.set_led(new_wall, new_led, 0, 0, 0)
-        
-        self.game.state = "WAITING"
-        self.root.after(0, lambda: self.ui.update_status("Your turn!"))
-
-        self.stop_timer_event.clear()
-        threading.Thread(target=self._round_timer_thread, daemon=True).start()
-
     def _round_timer_thread(self):
         start_time = time.time()
         timeout = 15  # Secunde totale
@@ -150,6 +177,7 @@ class MasterLauncher:
                 
                 # Sclipici Cyan pe ochiul peretelui țintă
                 self.network.set_led(target_wall, 0, 0, 242, 255)
+                self.snd_hint.play()
                 time.sleep(0.2)
                 self.network.set_led(target_wall, 0, 0, 0, 0)
                 time.sleep(0.2)
@@ -164,6 +192,7 @@ class MasterLauncher:
         """Ce se întâmplă când expiră cele 15 secunde."""
         # Considerăm timeout-ul ca fiind un Game Over (Eșec)
         # Folosim peretele 1 ca referință pentru animația de fail dacă nu a apăsat nimic
+        self.snd_fail.play()
         self._process_press(1, 99) # Trimitem un index de LED care nu există ca să forțăm FAIL
 
     def stop_game(self):

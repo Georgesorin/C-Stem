@@ -29,7 +29,7 @@ class MemoryGame:
         return (wall, led) # Returnăm DOAR ultimul pas pentru a fi afișat
 
     def check_press(self, wall, led):
-        if self.state != "WAITING":
+        if self.state != "WAITING" or self.current_step >= len(self.sequence):
             return "IGNORE"
 
         target_wall, target_led = self.sequence[self.current_step]
