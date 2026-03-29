@@ -4,6 +4,9 @@ import sys
 import os
 import time
 import pygame
+import psutil
+import socket
+import random
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -11,6 +14,72 @@ from Controller import LightService
 from Simulator import EvilEyeSimulator
 from display.outside_display import ControlPanel
 from game_logic.memory_game import MemoryGame
+
+
+def build_discovery_packet():
+    rand1, rand2 = random.randint(0, 127), random.randint(0, 127)
+    payload = bytearray([0x0A, 0x02, *b"KX-HC04", 0x03, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x14])
+    pkt = bytearray([0x67, rand1, rand2, len(payload)]) + payload
+    pkt.append(calc_sum(pkt))
+    return pkt, rand1, rand2
+
+def run_discovery_flow():
+    interfaces = get_local_interfaces()
+    if not interfaces:
+        print("No active network interfaces found.")
+        return None
+    print("\n--- Network Selection ---")
+    for i, (iface, ip, bcast) in enumerate(interfaces):
+        print(f"[{i}] {iface} - {ip}")
+    try:
+        choice = int(input("\nSelect interface number: "))
+        sel = interfaces[choice]
+    except:
+        sel = interfaces[0]
+        print("Invalid choice, defaulting to 0.")
+    print(f"Using {sel[0]} ({sel[1]})")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    try: sock.bind((sel[1], 7800))
+    except: pass
+    
+    pkt, r1, r2 = build_discovery_packet()
+    try: sock.sendto(pkt, (sel[2], 4626))
+    except: return None
+    
+    print("🔍 Listening for devices...")
+    sock.settimeout(0.5)
+    end_time = time.time() + 3
+    devices = []
+    while time.time() < end_time:
+        try:
+            data, addr = sock.recvfrom(1024)
+            if len(data) >= 30 and data[0] == 0x68 and data[1] == r1 and data[2] == r2:
+                if addr[0] not in [d['ip'] for d in devices]:
+                    model = data[6:13].decode(errors='ignore').strip('\x00')
+                    devices.append({'ip': addr[0], 'model': model})
+                    print(f"✅ Found {model} at {addr[0]}")
+        except socket.timeout: continue
+        except: pass
+    sock.close()
+    if devices:
+        print(f"Targeting {devices[0]['ip']}\n")
+        return devices[0]['ip']
+    print("No devices found, using default config.\n")
+    return None
+
+def get_local_interfaces():
+    interfaces = []
+    for iface, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if addr.family == socket.AF_INET and not addr.address.startswith("127."):
+                # Calculăm o adresă de broadcast grosieră (sau folosim 255.255.255.255)
+                bcast = "255.255.255.255"
+                interfaces.append((iface, addr.address, bcast))
+    return interfaces
+
+def calc_sum(data):
+    return sum(data) & 0xFF
 
 class MasterLauncher:
     def __init__(self, root):
@@ -23,7 +92,6 @@ class MasterLauncher:
         self.stop_timer_event = threading.Event()
 
         self.network = LightService()
-        self.network.set_device("127.0.0.1")
         self.network.start_receiver()
         self.network.start_polling()
 
@@ -33,15 +101,27 @@ class MasterLauncher:
         self.ui = ControlPanel(self.root, self.start_game, self.stop_game, self.resume_game, self.end_game)
         self.network.on_button_state = self._hardware_input_handler
 
-        pygame.mixer.init()
-        
-        # Încarci sunetele în memorie (ca să nu existe lag)
-        self.snd_press = pygame.mixer.Sound("game_logic/_sfx/press_ok.wav")
-        self.snd_fail = pygame.mixer.Sound("game_logic/_sfx/fail.wav")
-        self.snd_hint = pygame.mixer.Sound("game_logic/_sfx/hint.wav")
-        self.snd_win = pygame.mixer.Sound("game_logic/_sfx/victory.wav")
-        self.snd_your_turn = pygame.mixer.Sound("game_logic/_sfx/15_sec_count.wav")
-        self.snd_fail = pygame.mixer.Sound("game_logic/_sfx/fail.wav")
+        self.audio_ok = False
+        try:
+            pygame.mixer.pre_init(44100, -16, 2, 512)
+            pygame.mixer.init()
+            self.audio_ok = True
+            print("🔊 Sistem audio inițializat.")
+        except Exception as e:
+            print(f"⚠️ Atenție: Mixerul audio nu a putut fi pornit ({e}).")
+
+        self.snd_press = self.snd_fail = self.snd_hint = self.snd_win = self.snd_your_turn = None
+
+        if self.audio_ok:
+            try:
+                self.snd_press = pygame.mixer.Sound("game_logic/_sfx/press_ok.wav")
+                self.snd_fail = pygame.mixer.Sound("game_logic/_sfx/fail.wav")
+                self.snd_hint = pygame.mixer.Sound("game_logic/_sfx/hint.wav")
+                self.snd_win = pygame.mixer.Sound("game_logic/_sfx/victory.wav")
+                self.snd_your_turn = pygame.mixer.Sound("game_logic/_sfx/15_sec_count.wav")
+            except Exception as e:
+                print(f"❌ Eroare la încărcarea fișierelor SFX: {e}")
+
 
     def _hardware_input_handler(self, ch, led, is_trig, is_disc):
         if is_trig and hasattr(self, 'game') and self.game:
@@ -50,31 +130,28 @@ class MasterLauncher:
                 self.root.after(0, lambda: self._process_press(ch, led))
 
     def _process_press(self, ch, led):
-        self.snd_fail.play()
-        # 1. Protecție: dacă între timp starea s-a schimbat, ieșim
+        if self.snd_fail:
+            self.snd_fail.play()
         if not hasattr(self, 'game') or self.game.state != "WAITING":
             return
 
-        # 2. Oprim sunetul de turn și timer-ul imediat
-        if hasattr(self, 'current_turn_channel') and self.current_turn_channel:
-            self.current_turn_channel.stop()
+        if self.snd_your_turn:
+            self.current_turn_channel = self.snd_your_turn.play()
+        else:
+            self.current_turn_channel = None    
         self.stop_timer_event.set() 
 
-        # 3. Verificăm apăsarea
         result = self.game.check_press(ch, led)
         
         if result == "IGNORE": 
             return
 
-        # Feedback corect: Verde pe buton
         if result in ["STEP_CORRECT", "LEVEL_COMPLETE", "ULTIMATE_WIN"]:
             self.snd_press.play()
             self.network.set_led(ch, led, 0, 255, 0)
             self.root.after(300, lambda c=ch, l=led: self.network.set_led(c, l, 0, 0, 0))
 
         if result == "LEVEL_COMPLETE":
-            # Folosește un sunet de succes aici, nu cel de fail!
-            # self.snd_press.play() sau un sunet nou de 'level_up'
             self.network.set_led(ch, 0, 0, 255, 0) 
             self.ui.update_status(f"Step {len(self.game.sequence)}/10 Complete", "#00ff88")
             self.root.after(1000, self.run_next_round)
@@ -87,7 +164,8 @@ class MasterLauncher:
             self.root.after(5000, self._reset_to_lobby)
 
         elif result == "GAME_OVER":
-            self.snd_fail.play()
+            if self.snd_fail:
+                self.snd_fail.play()
             self.game_running = False
             self.network.set_led(ch, led, 255, 0, 0)
             self.ui.show_full_screen_message("SYSTEM FAILURE\nYOU LOSE", "#ff2a6d")
@@ -99,41 +177,32 @@ class MasterLauncher:
         self.network.all_off()
         time.sleep(0.5)
         
-        # Adăugăm pasul nou
         new_wall, new_led = self.game.add_next_step()
         
-        # ARĂTĂM DOAR ULTIMUL ELEMENT (HARD MODE)
-        # 1. Indicator Cyan pe Ochi
         self.network.set_led(new_wall, 0, 0, 242, 255)
         time.sleep(1.0)
         self.network.set_led(new_wall, 0, 0, 0, 0)
         time.sleep(0.2)
 
-        # 2. Arată butonul (Albastru)
         self.network.set_led(new_wall, new_led, 0, 0, 255)
         time.sleep(1.0)
         self.network.set_led(new_wall, new_led, 0, 0, 0)
         
-        # SETĂM STAREA PE WAITING ȘI ABIA APOI REDĂM SUNETUL
         self.game.state = "WAITING"
         self.current_turn_channel = self.snd_your_turn.play()
         
         self.root.after(0, lambda: self.ui.update_status("Your turn!"))
 
-        # Pornim timer-ul de 15 secunde
         self.stop_timer_event.clear()
         threading.Thread(target=self._round_timer_thread, daemon=True).start()
 
     def _alarm_strobe_thread(self):
         """Efect de stroboscop roșu pentru toți ochii."""
-        # Sclipim de 6 ori (3 secunde total)
         for _ in range(6):
-            # Aprindem toți ochii (LED 0)
             for wall in range(1, 5):
                 self.network.set_led(wall, 0, 255, 0, 0)
             time.sleep(0.3)
             
-            # Stingem toți ochii
             for wall in range(1, 5):
                 self.network.set_led(wall, 0, 0, 0, 0)
             time.sleep(0.2)
@@ -156,26 +225,21 @@ class MasterLauncher:
 
     def _round_timer_thread(self):
         start_time = time.time()
-        timeout = 15  # Secunde totale
-        warning_time = 5 # Ultimele 5 secunde
+        timeout = 15
+        warning_time = 5
         
         while time.time() - start_time < timeout:
-            # Dacă jucătorul a terminat runda sau a greșit, oprim timer-ul
             if self.stop_timer_event.is_set() or not self.game_running:
                 return
 
             elapsed = time.time() - start_time
             remaining = timeout - elapsed
 
-            # Actualizăm UI-ul cu timpul rămas (opțional)
             self.root.after(0, lambda r=remaining: self.ui.update_status(f"Time: {int(r)}s"))
 
-            # Logica de sclipocire (Hint) în ultimele 5 secunde
             if remaining <= warning_time:
-                # Aflăm care este peretele unde se află piesa curentă
                 target_wall, _ = self.game.sequence[self.game.current_step]
                 
-                # Sclipici Cyan pe ochiul peretelui țintă
                 self.network.set_led(target_wall, 0, 0, 242, 255)
                 self.snd_hint.play()
                 time.sleep(0.2)
@@ -211,6 +275,19 @@ class MasterLauncher:
         self.root.destroy()
 
 if __name__ == "__main__":
+    # --- PASUL 1: SCANARE (DISCOVERY) ---
+    # Aceasta va deschide meniul în consolă pentru selectarea rețelei
+    discovered_ip = run_discovery_flow()
+    
     root = tk.Tk()
     app = MasterLauncher(root)
+    
+    # --- PASUL 2: INJECTARE IP ---
+    if discovered_ip:
+        print(f"📡 Conectare la dispozitiv real: {discovered_ip}")
+        app.network.set_device(discovered_ip)
+    else:
+        print("🖥️ Rămânem pe simulator local (127.0.0.1)")
+        app.network.set_device("127.0.0.1")
+        
     root.mainloop()

@@ -135,7 +135,7 @@ class NetworkManager:
         start_packet.append(0x00) 
         try: 
             self.sock_send.sendto(start_packet, (target_ip, port))
-            self.sock_send.sendto(start_packet, ("127.0.0.1", port))
+            self.sock_send.sendto(start_packet, ("255.255.255.255", port))
         except: pass
 
         # --- 2. FFF0 Packet ---
@@ -164,7 +164,7 @@ class NetworkManager:
         
         try: 
             self.sock_send.sendto(fff0_packet, (target_ip, port))
-            self.sock_send.sendto(fff0_packet, ("127.0.0.1", port))
+            self.sock_send.sendto(fff0_packet, ("255.255.255.255", port))
         except: pass
         
         # --- 3. Data Packets ---
@@ -201,7 +201,7 @@ class NetworkManager:
             
             try: 
                 self.sock_send.sendto(packet, (target_ip, port))
-                self.sock_send.sendto(packet, ("127.0.0.1", port))
+                self.sock_send.sendto(packet, ("255.255.255.255", port))
             except: pass
             
             data_packet_index += 1
@@ -221,7 +221,7 @@ class NetworkManager:
         end_packet.append(0x00) 
         try: 
             self.sock_send.sendto(end_packet, (target_ip, port))
-            self.sock_send.sendto(end_packet, ("127.0.0.1", port))
+            self.sock_send.sendto(end_packet, ("255.255.255.255", port))
         except: pass
 
 class MatrixGUI:
@@ -247,6 +247,7 @@ class MatrixGUI:
 
         # Setup Network
         self.network = NetworkManager()
+        self.network.discover("0.0.0.0", 4626, self._on_device_discovered)
         self.send_lock = threading.Lock()
         
         # Trigger States: dict mapping (ch, led) to bool
@@ -374,6 +375,19 @@ class MatrixGUI:
         self.lbl_net_status.config(text=f"Target: {self.network.target_ip}\nPort OUT:{self.network.send_port} | IN:{CONFIG.get('recv_port')}")
         print(f"Matrix_GUI: Config updated.")
 
+    def _on_device_discovered(self, devices):
+        if devices:
+            new_ip = devices[0]['ip']
+            self.network.target_ip = new_ip
+            # Actualizăm eticheta de status din interfață (GUI)
+            self.root.after(0, lambda: self.lbl_net_status.config(
+                text=f"Target: {new_ip} (AUTO-FOUND)\nPort OUT: 4626 | IN: 7800",
+                fg="#00ff00" # Se face verde când e găsit
+            ))
+            print(f"✅ Auto-Connected to Hardware at: {new_ip}")
+        else:
+            print("❌ No hardware found. Using manual/broadcast settings.")
+
     def _bind_receiver(self):
         p_in = int(self.port_in_var.get())
         try: self.sock_recv.close()
@@ -411,7 +425,7 @@ class MatrixGUI:
                 print(f"Receiver error: {e}")
 
     def _update_iface_list(self):
-        ips = ["0.0.0.0", "127.0.0.1"]
+        ips = ["0.0.0.0", "255.255.255.255"]
         try:
             for iface, addrs in psutil.net_if_addrs().items():
                 for addr in addrs:
@@ -740,7 +754,7 @@ class ConfigDialog(tk.Toplevel):
         tk.Entry(self, textvariable=sv, bg="#111", fg="white", font=("Consolas", 9), insertbackground="white", width=20).grid(row=row, column=1, padx=5, pady=3, sticky="we")
 
     def _load_interfaces(self):
-        ips = ["0.0.0.0", "127.0.0.1"]
+        ips = ["0.0.0.0", "255.255.255.255"]
         try:
             for iface, addrs in psutil.net_if_addrs().items():
                 for addr in addrs:
