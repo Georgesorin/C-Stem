@@ -10,24 +10,25 @@ from tkinter import ttk, messagebox, filedialog
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-# --- Inițializare Pygame pentru Windows ---
+# --- Inițializare Pygame pentru Windows (Suport pentru Resume) ---
 HAS_PYGAME = False
 try:
     import pygame
     pygame.mixer.init()
     HAS_PYGAME = True
-except: pass
+except:
+    print("[!] Eroare Pygame: Muzica nu va funcționa.")
 
 # ==============================================================================
-# --- Configurații Globale ---
+# --- Configurații Globale & Protocol ---
 # ==============================================================================
 PORT_SEND = 4626 # Simulator IN
 PORT_RECV = 7800 # Simulator OUT
 
 COLORS = {
-    "EYE_OPEN": (255, 0, 0),    
-    "EYE_CLOSED": (0, 40, 0),   
-    "POINT": (0, 255, 255),     
+    "EYE_OPEN": (255, 0, 0),    # Roșu
+    "EYE_CLOSED": (0, 40, 0),   # Verde stins
+    "POINT": (0, 255, 255),     # Cyan
     "OFF": (0, 0, 0)
 }
 
@@ -53,12 +54,10 @@ PASSWORD_ARRAY = [
 def calc_checksum(data):
     return PASSWORD_ARRAY[sum(data) & 0xFF]
 
-# ==============================================================================
-# --- Helperi Pachete Protocol v11 ---
-# ==============================================================================
 def build_packet(cmd, seq, payload=b""):
-    # Format: Start(3344), Config(FFF0), Data(8877), End(5566)
+    # Antet intern: 0x02, 0, 0, command_id, location, payload_len
     internal = bytearray([0x02, 0, 0, (cmd >> 8) & 0xFF, cmd & 0xFF, 0, 0, (len(payload) >> 8) & 0xFF, len(payload) & 0xFF]) + payload
+    # Antet extern: 0x75, rand, rand, internal_len
     hdr = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), (len(internal) >> 8) & 0xFF, len(internal) & 0xFF])
     pkt = hdr + internal
     pkt[10], pkt[11] = (seq >> 8) & 0xFF, seq & 0xFF
@@ -66,12 +65,13 @@ def build_packet(cmd, seq, payload=b""):
     return pkt
 
 # ==============================================================================
-# --- Clasa Hardware ---
+# --- Clasa Hardware (Protocol v11 Complet) ---
 # ==============================================================================
 class EvilEyeHardware:
     def __init__(self):
         self.running = False
-        self.button_states = {w: {l: False for l in range(11)} for w in range(1, 5)}
+        self.eye_states = {w: False for w in range(1, 5)} # Senzori mișcare (LED 0)
+        self.button_states = {w: {l: False for l in range(1, 11)} for w in range(1, 5)}
         self._led_states = {}
         self._seq = 0
 
@@ -93,23 +93,21 @@ class EvilEyeHardware:
             for (ch, led), (r, g, b) in self._led_states.items():
                 ch_idx = ch - 1
                 if 0 <= ch_idx < 4 and 0 <= led < 11:
-                    frame[led * 12 + ch_idx] = r
-                    frame[led * 12 + 4 + ch_idx] = g
+                    # Logica de intercalare corectă G-R-B
+                    frame[led * 12 + ch_idx] = g
+                    frame[led * 12 + 4 + ch_idx] = r
                     frame[led * 12 + 8 + ch_idx] = b
 
             ep = (self.target_ip, PORT_SEND)
             try:
-                # SECVENȚA OBLIGATORIE V11
+                # SECVENȚA OBLIGATORIE DE PROTOCOL
                 self.sock.sendto(build_packet(0x3344, self._seq), ep) # Start
                 time.sleep(0.005)
-                
-                fff0_pld = bytearray([0, 11] * 4) # Config pt 4 walls x 11 leds
+                fff0_pld = bytearray([0, 11] * 4)
                 self.sock.sendto(build_packet(0x8877, self._seq, fff0_pld), ep) # FFF0
                 time.sleep(0.005)
-                
-                self.sock.sendto(build_packet(0x8877, 0, frame), ep) # Data
+                self.sock.sendto(build_packet(0x8877, 0, frame), ep) # Date Pixeli
                 time.sleep(0.005)
-                
                 self.sock.sendto(build_packet(0x5566, self._seq), ep) # End
             except: pass
             time.sleep(0.05)
@@ -126,11 +124,13 @@ class EvilEyeHardware:
                     for ch in range(1, 5):
                         base = 2 + (ch - 1) * 171
                         for led in range(11):
-                            self.button_states[ch][led] = (data[base + 1 + led] == 0xCC)
+                            is_pressed = (data[base + 1 + led] == 0xCC)
+                            if led == 0: self.eye_states[ch] = is_pressed
+                            else: self.button_states[ch][led] = is_pressed
             except: pass
 
 # ==============================================================================
-# --- Logica Operator ---
+# --- Logica Operator & Joc ---
 # ==============================================================================
 class EvilEyeOperator:
     def __init__(self):
@@ -141,11 +141,11 @@ class EvilEyeOperator:
         self.hit_cooldown = 0
         self.bonus_points = []
         self.music_file = None
-        self.is_music_paused = False
+        self.is_music_paused = False 
         self.loss_sound_played = False
 
         self.root = tk.Tk()
-        self.root.title("STAFF CONTROL - EVIL EYE")
+        self.root.title("STAFF CONTROL")
         self.root.geometry("450x550")
         
         self.view = tk.Toplevel(self.root)
@@ -169,11 +169,11 @@ class EvilEyeOperator:
         tk.Button(self.root, text="📁 Încarcă Muzica", command=self._sel_music).pack()
         self.lbl_song = tk.Label(self.root, text="Niciun fișier", fg="blue"); self.lbl_song.pack(pady=5)
 
-        self.btn_play = tk.Button(self.root, text="▶️ PLAY (Safe)", bg="#27ae60", fg="white", 
+        self.btn_play = tk.Button(self.root, text="▶️ PLAY (Safe Mode)", bg="#27ae60", fg="white", 
                                   command=self._action_safe, state="disabled", height=2, width=25)
         self.btn_play.pack(pady=5)
         
-        self.btn_stop = tk.Button(self.root, text="⏸️ PAUSE (Watching)", bg="#c0392b", fg="white", 
+        self.btn_stop = tk.Button(self.root, text="⏸️ PAUSE (Watching Mode)", bg="#c0392b", fg="white", 
                                   command=self._action_watching, state="disabled", height=2, width=25)
         self.btn_stop.pack(pady=5)
 
@@ -181,11 +181,11 @@ class EvilEyeOperator:
         tk.Label(self.view, text="EVIL EYE", font=("Impact", 80), bg="black", fg="#ff3333").pack(pady=30)
         self.lbl_score_v = tk.Label(self.view, text="SCOR: 0", font=("Arial", 60), bg="black", fg="white"); self.lbl_score_v.pack()
         self.lbl_lives_v = tk.Label(self.view, text="VIEȚI: 5", font=("Arial", 60), bg="black", fg="#ff4444"); self.lbl_lives_v.pack()
-        self.lbl_msg_v = tk.Label(self.view, text="AȘTEPTARE...", font=("Arial", 40), bg="black", fg="#555555"); self.lbl_msg_v.pack(pady=40)
+        self.lbl_msg_v = tk.Label(self.view, text="STANDBY", font=("Arial", 40), bg="black", fg="#555555"); self.lbl_msg_v.pack(pady=40)
 
     def _connect(self):
         self.hw.connect(self._ip_var.get())
-        self.lbl_status.config(text=f"✅ CONECTAT LA {self._ip_var.get()}", fg="green")
+        self.lbl_status.config(text=f"✅ CONECTAT", fg="green")
         self.btn_play.config(state="normal"); self.btn_stop.config(state="normal")
 
     def _sel_music(self):
@@ -200,7 +200,7 @@ class EvilEyeOperator:
                 pygame.mixer.music.load(self.music_file)
                 pygame.mixer.music.play(-1)
             self.is_music_paused = False
-        if not self.bonus_points: [self.spawn_point() for _ in range(8)]
+        if not self.bonus_points: [self.spawn_point() for _ in range(10)]
 
     def _action_watching(self):
         self.game_phase = "WATCHING"
@@ -218,18 +218,27 @@ class EvilEyeOperator:
             now = time.time()
             if self.game_phase in ["SAFE", "WATCHING"]:
                 for p in self.bonus_points: p['fade'] = min(1.0, p['fade'] + 0.1)
+                
                 penalty = False
                 for w in range(1, 5):
+                    # Colectare puncte
                     for l in range(1, 11):
                         if self.hw.button_states[w][l]:
                             for p in self.bonus_points[:]:
                                 if p['wall'] == w and p['led'] == l:
                                     self.score += 100; self.bonus_points.remove(p); self.spawn_point()
-                            if self.game_phase == "WATCHING" and now > self.hit_cooldown:
-                                penalty = True
-                if penalty:
-                    self.lives -= 1; self.hit_cooldown = now + 1.5
+                    
+                    # Logica Penalizare Senzor + Butoane
+                    if self.game_phase == "WATCHING":
+                        # Dacă senzorul (LED 0) vede mișcare SAU cineva apasă butoane pe acel perete
+                        if self.hw.eye_states[w] or any(self.hw.button_states[w].values()):
+                            penalty = True
+
+                if penalty and now > self.hit_cooldown:
+                    self.lives -= 1
+                    self.hit_cooldown = now + 2.0
                     if self.lives <= 0: self.game_phase = "GAMEOVER"; self._play_loss()
+
             self._update_hardware()
             self.root.after(0, self._update_ui)
             time.sleep(0.05)
