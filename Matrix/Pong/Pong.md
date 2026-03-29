@@ -1,27 +1,48 @@
-***PONG***
+🟦 Game 2: MATRIX PONG
+Location: Matrix Room
+🎮 Introduction
+Matrix Pong aduce clasicul joc arcade în realitate pe o grilă LED de 16 x 32. Nu este doar un joc de reflexe, ci și unul de mișcare fizică, unde jucătorii își controlează paleta prin poziționarea lor pe grid-ul interactiv de la podea.
 
-Joc de 2 persoane
+🕹️ Gameplay mechanics
+Jocul este o competiție Versus 1 la 1 (sau echipe), fără nivele, bazată pe puncte.
 
-**Fara nivele!!!!**
+Fileul (Paleta): Fiecare jucător controlează un "fileu" format din 8 segmente (pătrate).
 
-Se considera ca fileul fiecarui jucator e de 8 patrate si poate merge doar sus jos
-Jucatorul trebuie sa stea pe ultimul patrat al fileului si daca face un pas in sus sau in jos pe coloana sa fileul se va deplasa dupa acea directie
+Control prin Mișcare: Jucătorul trebuie să stea fizic pe ultimul pătrat al paletei sale. Dacă face un pas înainte (sus) sau înapoi (jos) pe coloana sa, întreaga paletă se deplasează în acea direcție.
 
-Exista si un delimitator intre cei doi jucatori format dintr-o linie punctata
+Mingea: Reprezentată de un pătrat luminos care se mișcă folosind vectori de viteză. La începutul meciului, mingea pleacă întotdeauna către Jucătorul 1.
 
-Mingea se poate lovi de partea de sus si de jos, dar daca se atinge de partile laterale se considera ca a pierdut juctorul respectiv
-Mingea merge prima data la jucatorul 1
-Mingea reprezinta un patrat care se va misca in linie dreapta cu tenta de jos(de vazut cum simulez o astfel de gravitatie, cu vectori de viteza aparent)
+Gravitație Simulată: Traiectoria mingii tinde să aibă o ușoară deviere pe axa verticală (simulând o formă de gravitație prin vectori) pentru a face mișcarea imprevizibilă.
 
-Sunet de lovitura atunci cand se loveste mingea de un fileu
-Sunet de esec mediu cand mingea rateaza fileul si se duce in void
-Sunet de game over cand un jucator ajunge la 11/21 de puncte
-Jumatatea castigatoare se coloreaza in verde(si scrie Winner) si cealalta in rosie (si scrie Loser)
+Delimitarea: Terenul este împărțit de o linie punctată centrală.
 
+Coliziuni: * Mingea ricoșează din marginile de sus și de jos.
 
-Poti alege numarul de runde: 1, 3 sau 5
-Poti alege numarul de puncte la care se considera castigul la fiecare jucator: 11/21
-Include a reset / restart option
-Consider pause, recovery, or failsafe states where useful
-Poti alege culoarea paletei
+Dacă mingea atinge marginile laterale în spatele paletei, jucătorul respectiv pierde punctul.
 
+🔊 Audio & Visual Feedback
+Collision Sound: Sunet de impact la lovirea paletei.
+
+Fail Sound: Sunet de eșec (void) când se ratează mingea.
+
+Game Over: Semnal sonor la atingerea limitei de puncte (11 sau 21).
+
+Visual Win/Loss: La final, jumătatea câștigătorului devine VERDE (Winner), iar cea a pierzătorului devine ROȘIE (Loser).
+
+⚙️ Configuration
+Runde: Meciul se poate juca în sistem "Best of" (1, 3 sau 5 runde).
+
+Scor de câștig: Limita de puncte per rundă (11 sau 21).
+
+Personalizare: Jucătorii pot alege culoarea paletei lor înainte de start.
+
+Control: Funcții de Reset / Restart și Pause disponibile pe touchscreen-ul de control.
+
+💎 LedHack Bonus Points Checklist (Implemented)
+[x] Smart Hardware Usage: Controlul paletei în Pong prin poziționarea fizică a jucătorului.
+
+[x] Sound Implementation: Feedback audio dinamic pentru acțiuni (lovituri, gol, win/loss).
+
+[x] Configurability: Opțiuni multiple pentru runde, scor și culori.
+
+[x] Onboarding: Ecrane de tutorial incluse înainte de "Mission Start".

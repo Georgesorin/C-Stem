@@ -55,11 +55,33 @@ class MasterLauncher:
             else:
                 print(f"❌ Sound file not found: {sound_path}")
 
+    def move_window_to_monitor(self, window, monitor_index):
+        """Mută o fereastră Tkinter pe monitorul specificat prin index."""
+        try:
+            monitors = screeninfo.get_monitors()
+            if monitor_index < len(monitors):
+                target = monitors[monitor_index]
+                # Calculăm centrul monitorului sau pur și simplu colțul stânga-sus
+                x = target.x
+                y = target.y
+                # window.geometry(f"+{x}+{y}") # Mută la 0,0 pe acel monitor
+                
+                # Dacă vrei să fie și fullscreen pe acel monitor:
+                window.geometry(f"{target.width}x{target.height}+{x}+{y}")
+                # window.attributes("-fullscreen", True) 
+            else:
+                print(f"Monitorul {monitor_index} nu a fost găsit.")
+        except Exception as e:
+            print(f"Eroare la detectare monitoare: {e}")
+
     def on_start(self):
         setup = self.ui.get_selected_setup()
         
         if hasattr(self, 'arena_window') and self.arena_window.winfo_exists():
             self.arena_window.destroy()
+        
+        self.move_window_to_monitor(self.root, 0)
+        self.move_window_to_monitor(self.arena_window, 1)
         
         self.arena_window = tk.Toplevel(self.root)
         self.arena_window.title("STADIUM VIEW")
@@ -100,14 +122,11 @@ class MasterLauncher:
 
         if AUDIO_MODE == "PYGAME":
             try:
-                # Putem folosi sunetul preîncărcat sau să-l încărcăm pe loc
                 s = pygame.mixer.Sound(path)
                 s.play()
             except: pass
         elif AUDIO_MODE == "SUBPROCESS":
             try:
-                # Pentru macOS: afplay
-                # Pentru Linux/WSL: aplay sau paplay
                 if sys.platform == "darwin":
                     subprocess.Popen(["afplay", path], stderr=subprocess.DEVNULL)
                 else:
@@ -149,16 +168,13 @@ class MasterLauncher:
                     self.trigger_winner_sequence(status)
                     return
                 elif status and status.startswith("GOAL"):
-<<<<<<< Updated upstream
-                    # ÎNLOCUIEȘTE: if self.snd_fail: self.snd_fail.play()
-                    # CU:
                     self.play_sound("fail") 
                     
                     self.game_engine.state = "COUNTDOWN"
-=======
-                    self.is_paused = True # Oprim loop-ul temporar
->>>>>>> Stashed changes
+
+                    self.is_paused = True
                     self.root.after(1000, lambda: self.run_countdown(3))
+                
                 elif status.startswith("ROUND_OVER"):
                     self.handle_round_end(status)
                     return
