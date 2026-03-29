@@ -1,48 +1,44 @@
-🟦 Game 2: MATRIX PONG
+Here is the documented version for MATRIX PONG, professionally formatted with Markdown and clear visual indicators:
+
+🏓 Game 2: MATRIX PONG
 Location: Matrix Room
-🎮 Introduction
-Matrix Pong aduce clasicul joc arcade în realitate pe o grilă LED de 16 x 32. Nu este doar un joc de reflexe, ci și unul de mișcare fizică, unde jucătorii își controlează paleta prin poziționarea lor pe grid-ul interactiv de la podea.
 
-🕹️ Gameplay mechanics
-Jocul este o competiție Versus 1 la 1 (sau echipe), fără nivele, bazată pe puncte.
+📋 Introduction
+Matrix Pong brings the classic arcade experience to life on a 16 x 32 LED grid. It is a game of fast-paced reflexes and physical movement, where players control their paddles by physically positioning themselves on the interactive floor grid.
 
-Fileul (Paleta): Fiecare jucător controlează un "fileu" format din 8 segmente (pătrate).
+⚙️ Gameplay Mechanics
+The game is a 1v1 (or team-based) Versus competition focused on points. Unlike other games, it features pure competitive play without progressive leveling.
 
-Control prin Mișcare: Jucătorul trebuie să stea fizic pe ultimul pătrat al paletei sale. Dacă face un pas înainte (sus) sau înapoi (jos) pe coloana sa, întreaga paletă se deplasează în acea direcție.
+🛡️ The Paddle: Each player controls a paddle consisting of 8 segments (tiles).
 
-Mingea: Reprezentată de un pătrat luminos care se mișcă folosind vectori de viteză. La începutul meciului, mingea pleacă întotdeauna către Jucătorul 1.
+🏃 Movement Control: Control is entirely physical. A player must stand on the last tile of their paddle. As the player moves up or down their specific column, the entire paddle follows that direction.
 
-Gravitație Simulată: Traiectoria mingii tinde să aibă o ușoară deviere pe axa verticală (simulând o formă de gravitație prin vectori) pentru a face mișcarea imprevizibilă.
+⚽ The Ball: Represented by a lit square moving via velocity vectors. At the start of the match, the ball is randomly served to one of the two players.
 
-Delimitarea: Terenul este împărțit de o linie punctată centrală.
+🌀 Simulated Gravity: The ball's trajectory includes slight deviations on the vertical axis, simulating "gravity" through vector shifts to make movement unpredictable.
 
-Coliziuni: * Mingea ricoșează din marginile de sus și de jos.
+🚧 Delimiters: The court is clearly divided by a central dotted line.
 
-Dacă mingea atinge marginile laterale în spatele paletei, jucătorul respectiv pierde punctul.
+💥 Collisions:
 
-🔊 Audio & Visual Feedback
-Collision Sound: Sunet de impact la lovirea paletei.
+The ball bounces off the top and bottom edges of the grid.
 
-Fail Sound: Sunet de eșec (void) când se ratează mingea.
+If the ball passes the paddle and touches the side edges, the defending player loses the point.
 
-Game Over: Semnal sonor la atingerea limitei de puncte (11 sau 21).
+🔊 Audio and Visual Feedback
+🎵 Collision Sound: A sharp impact sound triggers whenever the ball hits a paddle.
 
-Visual Win/Loss: La final, jumătatea câștigătorului devine VERDE (Winner), iar cea a pierzătorului devine ROȘIE (Loser).
+🌑 Fail Sound: A "void" or "miss" sound effect plays when a goal is scored.
 
-⚙️ Configuration
-Runde: Meciul se poate juca în sistem "Best of" (1, 3 sau 5 runde).
+🏆 Game Over: A distinct audio signal triggers when a player reaches the point limit.
 
-Scor de câștig: Limita de puncte per rundă (11 sau 21).
+🎨 Win/Loss Visuals: At the match conclusion, the winner's half of the grid turns Green (Winner) while the loser's half turns Red (Loser).
 
-Personalizare: Jucătorii pot alege culoarea paletei lor înainte de start.
+🛠️ Configuration
+🏆 Match Format: Players can choose a "Best of" system (1, 3, or 5 rounds).
 
-Control: Funcții de Reset / Restart și Pause disponibile pe touchscreen-ul de control.
+🔢 Winning Score: The point limit per round can be set to 11 or 21.
 
-💎 LedHack Bonus Points Checklist (Implemented)
-[x] Smart Hardware Usage: Controlul paletei în Pong prin poziționarea fizică a jucătorului.
+🌈 Customization: Players have the option to choose their paddle color before the match begins.
 
-[x] Sound Implementation: Feedback audio dinamic pentru acțiuni (lovituri, gol, win/loss).
-
-[x] Configurability: Opțiuni multiple pentru runde, scor și culori.
-
-[x] Onboarding: Ecrane de tutorial incluse înainte de "Mission Start".
+🕹️ Control: The operator has access to Reset, Restart, and Pause options via the main control touchscreen.

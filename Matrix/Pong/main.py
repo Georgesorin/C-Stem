@@ -8,6 +8,8 @@ from game_logic.PongGame import PongGame
 from Controller import NetworkManager 
 from Simulator import *
 import pygame
+import screeninfo
+import subprocess
 
 HAS_AUDIO = False
 AUDIO_MODE = "NONE"
@@ -77,17 +79,21 @@ class MasterLauncher:
     def on_start(self):
         setup = self.ui.get_selected_setup()
         
+        # 1. Curățăm fereastra veche dacă există
         if hasattr(self, 'arena_window') and self.arena_window.winfo_exists():
             self.arena_window.destroy()
         
-        self.move_window_to_monitor(self.root, 0)
-        self.move_window_to_monitor(self.arena_window, 1)
-        
+        # 2. CREĂM fereastra (Toplevel)
         self.arena_window = tk.Toplevel(self.root)
         self.arena_window.title("STADIUM VIEW")
         self.arena_window.geometry("800x600+600+100") 
         self.arena_window.configure(bg="black")
 
+        # 3. ACUM putem muta ferestrele pe monitoare
+        self.move_window_to_monitor(self.root, 0)          # Control Panel pe Monitor 0
+        self.move_window_to_monitor(self.arena_window, 1) # Arena pe Monitor 1
+
+        # 4. Inițializăm restul componentelor
         self.game_engine = PongGame(
             level=setup["difficulty"], 
             p1_rgb=setup["p1_color"], 
@@ -142,6 +148,8 @@ class MasterLauncher:
         else:
             self.stadium_gui.set_pause_status(False)
             self.game_engine.state = "PLAYING"
+            
+            self.is_paused = False 
             self.update_loop()
 
     def update_loop(self):

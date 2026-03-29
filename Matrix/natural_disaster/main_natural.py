@@ -196,7 +196,7 @@ class NaturalDisasterGame:
         # Timp mai mare de avertizare (am crescut de la 35 la 45). Ai timp lejer să fugi.
         meteor_timer = max(25, int((45 + self.num_players * 4) * diff_mult))
         
-        for f in range(250):
+        for f in range(600):
             if self.lives <= 0: break 
             frame = bytearray(1536)
             self._draw_base(frame)
@@ -256,7 +256,7 @@ class NaturalDisasterGame:
         coins = set()
         round_survived = True
 
-        for f in range(250):
+        for f in range(600):
             if self.lives <= 0: break
             frame = bytearray(1536)
             

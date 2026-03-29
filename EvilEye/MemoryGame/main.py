@@ -309,39 +309,25 @@ class MasterLauncher:
         self.network.all_off()
         self.root.destroy()
 
-<<<<<<< Updated upstream
     def play_background_music(self):
-        path = "game_logic/_sfx/background.mp3" 
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_path, "game_logic/_sfx/background.mp3") 
         if os.path.exists(path) and self.audio_ok:
             try:
                 pygame.mixer.music.load(path)
-                pygame.mixer.music.play(-1)
                 pygame.mixer.music.set_volume(0.5)
+                pygame.mixer.music.play(-1)
+                print(f"🎵 Muzica on: {path}")
             except Exception as e:
-                print(f"Eroare muzica: {e}")
+                print(f"⚠️ Error music: {e}")
+        else:
+            print(f"❌ Music not found: {path}")
 
 if __name__ == "__main__":
-=======
-iif __name__ == "__main__":
-    # 1. Comentează linia care cere input manual
-    # discovered_ip = run_discovery_flow() 
-    
-    # 2. Setează IP-ul direct (sau lasă-l None pentru simulator)
-    discovered_ip = None 
-
->>>>>>> Stashed changes
     root = tk.Tk()
-    # Nu mai apelăm run_discovery_flow() aici
     app = MasterLauncher(root)
-<<<<<<< Updated upstream
-=======
     
-    if discovered_ip:
-        print(f"📡 Conectare la dispozitiv real: {discovered_ip}")
-        app.network.set_device(discovered_ip)
-    else:
-        print("🖥️ Mod Simulator local (127.0.0.1)")
-        app.network.set_device("127.0.0.1")
+    print("🖥️ Mod pornire: Verifică Network Setup în interfață")
+    app.network.set_device("127.0.0.1") 
         
->>>>>>> Stashed changes
     root.mainloop()
