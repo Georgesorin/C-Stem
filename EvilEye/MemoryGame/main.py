@@ -70,17 +70,25 @@ def run_discovery_flow():
 def get_local_interfaces():
     import socket, psutil
     interfaces = [("Loopback", "127.0.0.1", "127.0.0.1")]
+    
+    # Adresa specifică pe care o cauți (clasa peretelui LED)
+    manual_target = ("Ethernet-LED", "169.254.182.11", "169.254.255.255")
+    
     try:
         for iface, addrs in psutil.net_if_addrs().items():
             for addr in addrs:
                 if addr.family == socket.AF_INET:
                     ip = addr.address
                     if not ip.startswith("127."):
-                        # Calculăm broadcast-ul clasei C
                         bcast = ".".join(ip.split('.')[:-1]) + ".255"
                         interfaces.append((iface, ip, bcast))
     except: pass
-    return interfaces
+    
+    # Dacă nu a fost găsită nicio adresă din clasa 169, o adăugăm forțat pentru selecție
+    if not any(ip.startswith("169.254") for _, ip, _ in interfaces):
+        interfaces.append(manual_target)
+        
+    return list(set(interfaces))
 
 def calc_sum(data):
     return sum(data) & 0xFF
@@ -125,11 +133,12 @@ class MasterLauncher:
         self.network.on_button_state = self._hardware_input_handler
 
     def _load_all_sounds(self):
-        """Încarcă fișierele audio doar dacă există pe disc."""
         self.snd_press = self.snd_fail = self.snd_hint = self.snd_win = self.snd_your_turn = None
-        
         if not self.audio_ok: return
 
+        # Obținem calea absolută a folderului unde se află main.py
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        
         sfx_map = {
             "press": "game_logic/_sfx/press_ok.wav",
             "fail": "game_logic/_sfx/fail.wav",
@@ -138,14 +147,16 @@ class MasterLauncher:
             "your_turn": "game_logic/_sfx/15_sec_count.wav"
         }
 
-        for attr, path in sfx_map.items():
-            if os.path.exists(path):
+        for attr, rel_path in sfx_map.items():
+            abs_path = os.path.join(base_path, rel_path) # Cale completă
+            if os.path.exists(abs_path):
                 try:
-                    setattr(self, f"snd_{attr}", pygame.mixer.Sound(path))
-                except:
-                    print(f"⚠️ Corrupt file: {path}")
+                    # Inițializăm sunetul cu un bitrate standard
+                    setattr(self, f"snd_{attr}", pygame.mixer.Sound(abs_path))
+                except Exception as e:
+                    print(f"⚠️ Eroare fișier {attr}: {e}")
             else:
-                print(f"❌ Missing file: {path}")
+                print(f"❌ Lipsă: {abs_path}")
 
 
     def _hardware_input_handler(self, ch, led, is_trig, is_disc):

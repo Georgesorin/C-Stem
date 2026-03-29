@@ -47,63 +47,75 @@ class Ball:
     def __init__(self, base_speed=0.5, acceleration=0.05):
         self.base_speed = base_speed
         self.acceleration = acceleration
+        self.x = 8
+        self.y = 16
+        self.vx = 0
+        self.vy = 0
         self.reset()
 
     def reset(self):
-        self.x = 8.0
-        self.y = 16.0
-        self.vx = self.base_speed
-        self.vy = self.base_speed
+        """Resetează mingea la centru și alege o direcție aleatorie."""
+        self.x = 16 // 2
+        self.y = 32 // 2
+        
+        # 1. Alegem aleatoriu jucătorul: -1 (Jucător 1, sus) sau 1 (Jucător 2, jos)
+        direction_y = random.choice([-1, 1])
+        
+        # 2. Stabilim viteza pe verticală bazată pe direcția aleasă
+        self.vy = self.base_speed * direction_y
+        
+        # 3. Adăugăm un unghi aleatoriu pe orizontală (X) ca să nu plece mereu drept
+        self.vx = random.uniform(-0.3, 0.3)
+        
+        print(f"Mingea pleacă spre Jucătorul {'2 (Jos)' if direction_y > 0 else '1 (Sus)'}")
 
     def update(self, p1, p2, obstacles=[]):
         self.x += self.vx
         self.y += self.vy
 
-        if self.x <= 1.0: 
+        # Coliziune cu pereții laterali
+        if self.x <= 0: 
             self.vx *= -1
-            self.x = 1.1
-        elif self.x >= 14.0: 
+            self.x = 0.1
+        elif self.x >= 15: 
             self.vx *= -1
-            self.x = 13.9
+            self.x = 14.9
 
-        if self.vy < 0:
-            if 1.0 <= self.y <= 1.5: 
-                if p1.x <= self.x <= p1.x + p1.width:
-                    self.vy *= -1
-                    self.y = 1.6 
-                    self.vx *= 1.05
-                    self.vy *= 1.05
+        # Coliziune Paletă Jucător 1 (Sus, y=1)
+        if self.vy < 0 and 1.0 <= self.y <= 1.5: 
+            if p1.x <= self.x <= p1.x + p1.width:
+                self.vy *= -1
+                self.y = 1.6 
+                # Accelerare la fiecare lovitură
+                self.vx *= 1.1
+                self.vy *= 1.1
 
-        if self.vy > 0:
-            if 29.5 <= self.y <= 30.0: 
-                if p2.x <= self.x <= p2.x + p2.width:
-                    self.vy *= -1
-                    self.y = 29.4
-                    self.vx *= 1.05
-                    self.vy *= 1.05
+        # Coliziune Paletă Jucător 2 (Jos, y=30)
+        if self.vy > 0 and 29.5 <= self.y <= 30.0: 
+            if p2.x <= self.x <= p2.x + p2.width:
+                self.vy *= -1
+                self.y = 29.4
+                self.vx *= 1.1
+                self.vy *= 1.1
         
+        # Gol pentru Jucătorul 2 (Mingea a ieșit pe sus)
         if self.y <= 0:
             p2.score += 1
-            self.reset()
+            self.reset() # Aici se apelează logica random de plecare
             return "GOAL_P2"
         
+        # Gol pentru Jucătorul 1 (Mingea a ieșit pe jos)
         if self.y >= 31:
             p1.score += 1
-            self.reset()
+            self.reset() # Aici se apelează logica random de plecare
             return "GOAL_P1"
         
+        # Coliziune Obstacole
         for obs in obstacles:
             for px, py in obs.get_pixels():
                 if abs(self.x - px) < 0.8 and abs(self.y - py) < 0.8:
                     self.vy *= -1
-                    
-                    self.vx += random.uniform(-0.2, 0.2)
-                    
-                    self.vx *= 1.1
-                    self.vy *= 1.1
-                    
-                    self.y += self.vy * 2
-                    
+                    self.vx += random.uniform(-0.1, 0.1)
                     return "HIT_OBSTACLE"
             
         return None
@@ -112,6 +124,7 @@ class PongGame:
     def __init__(self, level="Normal", p1_rgb=(255,0,0), p2_rgb=(0,0,255), total_rounds=3):
         obs_counts = {"Easy": 0, "Normal": 2, "Hard": 5}
         count = obs_counts.get(level, 2)
+        self.color_buttons = []
         
         self.obstacles = []
         for _ in range(count):
@@ -142,6 +155,31 @@ class PongGame:
         self.state = "COUNTDOWN" 
         self.current_digit = 3
         self.goal_loser = 0
+
+    def _preset_btn(self, parent, text, r, g, b, fg_col):
+        btn = tk.Button(parent, text=text, 
+                        bg="#1a1a1a", fg=fg_col, 
+                        font=("Consolas", 10, "bold"),
+                        relief="flat", padx=10, pady=5, 
+                        cursor="hand2", anchor="w")
+        
+    def apply():
+        for b in self.color_buttons:
+            b.config(bg="#1a1a1a", relief="flat", highlightthickness=0)
+            
+        btn.config(bg="#333333", 
+                       highlightbackground=fg_col, 
+                       highlightcolor=fg_col, 
+                       highlightthickness=2)
+            
+        self._sv_r.set(str(r))
+        self._sv_g.set(str(g))
+        self._sv_b.set(str(b))
+        self._update_preview()
+
+        btn.config(command=apply)
+        btn.pack(fill=tk.X, padx=8, pady=2)
+        self.color_buttons.append(btn)
 
     def reset_for_new_round(self):
         self.p1.score = 0

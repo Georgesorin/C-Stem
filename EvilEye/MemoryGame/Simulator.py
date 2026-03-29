@@ -15,7 +15,7 @@ def _load_config():
     defaults = {
         "send_port": 7800,
         "recv_port": 4626,
-        "device_ip": "255.255.255.255",
+        "device_ip": "169.254.182.11",
         "last_used_ports": []
     }
     try:
@@ -281,7 +281,7 @@ class EvilEyeSimulator:
         self._sock_listen = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock_listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock_listen.settimeout(0.5)
-        try: self._sock_listen.bind((self._bind_ip, self.listen_port))
+        try: self._sock_listen.bind(("0.0.0.0", self.listen_port))
         except: pass
         self._sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

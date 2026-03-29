@@ -10,13 +10,20 @@ from Simulator import *
 import pygame
 
 HAS_AUDIO = False
+AUDIO_MODE = "NONE"
+
 try:
     pygame.mixer.pre_init(44100, -16, 2, 512)
     pygame.mixer.init()
     HAS_AUDIO = True
-    print("🔊 Audio system initialized")
+    AUDIO_MODE = "PYGAME"
+    print("🔊 Audio via Pygame initialized")
 except Exception as e:
-    print(f"⚠️ Game will play with no sound")
+    # Verificăm dacă avem un player extern disponibil (afplay pentru Mac/WSL sau mplayer/aplay)
+    # Pe WSL, de obicei, afplay nu există, dar subprocess e util pentru alte unelte.
+    HAS_AUDIO = True 
+    AUDIO_MODE = "SUBPROCESS"
+    print(f"⚠️ Pygame audio failed, switching to subprocess mode")
 
 class MasterLauncher:
     def __init__(self, root):
@@ -74,17 +81,38 @@ class MasterLauncher:
             total_rounds=setup["rounds"]
         )
 
-        # if hasattr(self, 'sim_window') and self.sim_window.winfo_exists():
-        #     self.sim_window.destroy()
-        # self.sim_window = tk.Toplevel(self.root)
-        # self.game_window = MatrixSimulator(self.sim_window)
-
         self.net_manager = NetworkManager(self.game_engine)
         self.net_manager.start_bg()
         
         self.ui.show_game_controls()
         self.is_paused = False
         self.run_countdown(3)
+
+    def play_sound(self, sound_key):
+        """Redă sunetul în funcție de capabilitățile sistemului"""
+        sound_files = {
+            "fail": os.path.join("game_logic", "sfx", "fail.wav"),
+        }
+        
+        path = sound_files.get(sound_key)
+        if not path or not os.path.exists(path):
+            return
+
+        if AUDIO_MODE == "PYGAME":
+            try:
+                # Putem folosi sunetul preîncărcat sau să-l încărcăm pe loc
+                s = pygame.mixer.Sound(path)
+                s.play()
+            except: pass
+        elif AUDIO_MODE == "SUBPROCESS":
+            try:
+                # Pentru macOS: afplay
+                # Pentru Linux/WSL: aplay sau paplay
+                if sys.platform == "darwin":
+                    subprocess.Popen(["afplay", path], stderr=subprocess.DEVNULL)
+                else:
+                    subprocess.Popen(["aplay", path], stderr=subprocess.DEVNULL)
+            except: pass
 
     def run_countdown(self, seconds):
         if seconds > 0:
@@ -121,10 +149,12 @@ class MasterLauncher:
                     self.trigger_winner_sequence(status)
                     return
                 elif status and status.startswith("GOAL"):
-                    if self.snd_fail: self.snd_fail.play()
+                    # ÎNLOCUIEȘTE: if self.snd_fail: self.snd_fail.play()
+                    # CU:
+                    self.play_sound("fail") 
+                    
                     self.game_engine.state = "COUNTDOWN"
                     self.root.after(1000, lambda: self.run_countdown(3))
-                    return
                 elif status.startswith("ROUND_OVER"):
                     self.handle_round_end(status)
                     return

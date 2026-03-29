@@ -132,9 +132,20 @@ class ControlPanel:
         self.lbl_net_status.config(text=f"✅ Connected to: {ip}", fg=self.C_GREEN)
 
     def _on_connection_fail(self):
-        if self.network:
-            self.network.set_device("127.0.0.1")
-        self.lbl_net_status.config(text="⚠️ No device. Using Simulator", fg="yellow")
+        # Verificăm ce interfață era selectată în dropdown
+        selected = self.iface_var.get()
+        
+        if "169.254" in selected:
+            # Dacă am ales manual Ethernet-LED, forțăm IP-ul chiar dacă scanarea a eșuat
+            target_ip = "169.254.182.11" 
+            if self.network:
+                self.network.set_device(target_ip)
+            self.lbl_net_status.config(text=f"✅ FORCED IP: {target_ip}", fg=self.C_GREEN)
+        else:
+            # Dacă eram pe Loopback sau Wi-Fi și nu a găsit nimic, mergem pe simulator
+            if self.network:
+                self.network.set_device("127.0.0.1")
+            self.lbl_net_status.config(text="⚠️ No device. Using Simulator", fg="yellow")
 
     def _run_discovery_silent(self, local_ip, bcast_ip):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
