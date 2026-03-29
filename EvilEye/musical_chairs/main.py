@@ -61,20 +61,20 @@ def build_packet(cmd, seq, payload=b""):
     return pkt
 
 # ==============================================================================
-# --- Management Hardware ---
+# --- Management Hardware (Structuri Unice) ---
 # ==============================================================================
 class Wall:
     def __init__(self, wall_id):
-        self.id = wall_id
+        self.wall_id = wall_id # ID Structură (1-4)
         self.eye_active = False 
-        self.active_points = set() 
-        self.buttons = [False] * 11 
+        self.active_points = set() # ID-uri LED din interior (1-10)
+        self.buttons = [False] * 11 # Starea individuală a butoanelor
 
 class EvilEyeHardware:
     def __init__(self):
         self.target_ip = "169.254.182.11"
         self.running = False
-        self.walls = [Wall(i) for i in range(1, 5)]
+        self.walls = [Wall(i) for i in range(1, 5)] # 4 Pereți cu ID individual
         self._seq = 0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -94,9 +94,9 @@ class EvilEyeHardware:
             try:
                 data, _ = recv_sock.recvfrom(2048)
                 if len(data) >= 687 and data[0] == 0x88:
-                    for i in range(4):
+                    for i in range(4): # Wall ID mapping
                         base = 2 + i * 171
-                        for led in range(11):
+                        for led in range(11): # LED ID mapping
                             self.walls[i].buttons[led] = (data[base + 1 + led] == 0xCC)
             except: pass
 
@@ -130,7 +130,6 @@ class EvilEyeOperator:
     def setup_staff_ui(self):
         tk.Label(self.root, text="👁️ EVIL EYE CONTROL", font=("Arial", 16, "bold")).pack(pady=20)
         
-        # Link Connection Group
         conn_frame = tk.LabelFrame(self.root, text=" Hardware Setup ", padx=10, pady=10)
         conn_frame.pack(padx=20, fill="x")
         
@@ -159,7 +158,7 @@ class EvilEyeOperator:
         tk.Label(self.view, text="EVIL EYE", font=("Impact", 80), bg="black", fg="red").pack(pady=20)
         self.lbl_scr = tk.Label(self.view, text="SCOR: 0", font=("Arial", 60), bg="black", fg="white"); self.lbl_scr.pack()
         self.lbl_lvs = tk.Label(self.view, text="VIEȚI: 5", font=("Arial", 60), bg="black", fg="#ff4444"); self.lbl_lvs.pack()
-        self.lbl_msg = tk.Label(self.view, text="AȘTEPTARE CONEXIUNE...", font=("Arial", 40), bg="black", fg="gray"); self.lbl_msg.pack(pady=40)
+        self.lbl_msg = tk.Label(self.view, text="STANDBY", font=("Arial", 40), bg="black", fg="gray"); self.lbl_msg.pack(pady=40)
 
     def _do_connect(self):
         ip = self.ip_entry.get()
@@ -204,27 +203,39 @@ class EvilEyeOperator:
     def spawn_random_points(self, count):
         for _ in range(count):
             w = random.choice(self.hw.walls)
-            led = random.randint(1, 10)
-            w.active_points.add(led)
+            # Ne asigurăm că alegem un LED ID individual care nu este deja ocupat
+            led_ids = [i for i in range(1, 11) if i not in w.active_points]
+            if led_ids:
+                w.active_points.add(random.choice(led_ids))
 
     def game_loop(self):
         while self.running:
             now = time.time()
             if self.game_phase == "SAFE":
                 for w in self.hw.walls:
-                    if w.eye_active and w.buttons[0]: # Senzor LED 0
+                    # Detecție Senzor (Ochi) cu ID individual
+                    if w.eye_active and w.buttons[0]:
                         self.score += 100
                         w.eye_active = False
+                        # Consumăm apăsarea prin resetarea temporară a stării interne
+                        w.buttons[0] = False 
                         random.choice([wall for wall in self.hw.walls if wall.id != w.id]).eye_active = True
                         time.sleep(0.3)
                     
-                    pts_to_rem = [p for p in w.active_points if w.buttons[p]]
+                    # Detecție Puncte Bonus cu ID individual
+                    pts_to_rem = []
+                    for p_id in w.active_points:
+                        if w.buttons[p_id]:
+                            self.score += 100
+                            pts_to_rem.append(p_id)
+                            w.buttons[p_id] = False # Consumăm apăsarea
+                    
                     for p in pts_to_rem:
-                        self.score += 100
                         w.active_points.remove(p)
                         self.spawn_random_points(1)
 
             elif self.game_phase == "WATCHING":
+                # Peretele activ penalizează orice mișcare detectată pe ID-urile sale
                 w = self.hw.walls[self.active_eye_wall-1]
                 if (w.buttons[0] or any(w.buttons[1:])) and now > self.hit_cooldown:
                     self.lives -= 1
@@ -238,14 +249,15 @@ class EvilEyeOperator:
         if not self.hw.running: return
         self.hw._seq = (self.hw._seq + 1) & 0xFFFF
         frame = bytearray(132)
-        for l in range(11):
-            for i, w in enumerate(self.hw.walls):
+        for l in range(11): # LED ID individual (0-10)
+            for i, w in enumerate(self.hw.walls): # Wall ID individual (1-4)
                 color = COLORS["OFF"]
                 if l == 0 and w.eye_active:
                     color = COLORS["EYE_RED"] if self.game_phase == "WATCHING" else COLORS["EYE_SAFE"]
                 elif l in w.active_points and self.game_phase == "SAFE":
                     color = COLORS["POINT_YELLOW"]
                 
+                # Protocol v11 Intercalat (G, R, B)
                 frame[l * 12 + i] = color[1] # G
                 frame[l * 12 + 4 + i] = color[0] # R
                 frame[l * 12 + 8 + i] = color[2] # B
@@ -261,8 +273,10 @@ class EvilEyeOperator:
     def _update_ui(self):
         self.lbl_scr.config(text=f"SCOR: {self.score}")
         self.lbl_lvs.config(text=f"VIEȚI: {max(0, self.lives)}")
-        if self.game_phase == "SAFE": self.lbl_msg.config(text="CULEGE PUNCTELE!", fg="cyan")
-        elif self.game_phase == "WATCHING": self.lbl_msg.config(text=f"ATENȚIE: PERETE {self.active_eye_wall}! 👁️", fg="red")
+        if self.game_phase == "SAFE": 
+            self.lbl_msg.config(text="CULEGE PUNCTELE!", fg="cyan")
+        elif self.game_phase == "WATCHING": 
+            self.lbl_msg.config(text=f"ATENȚIE: PERETE {self.active_eye_wall}! 👁️", fg="red")
 
 if __name__ == "__main__":
     EvilEyeOperator().root.mainloop()
